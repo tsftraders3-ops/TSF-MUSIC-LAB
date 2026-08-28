@@ -115,3 +115,33 @@ Stage Summary:
 - APK deep-verified: version 2.3.0 in manifest, 4 dex, 1.8MB Hermes bundle with all v2.3 UI markers (boostForPlayer, Now playing, Next up, Browse all, Lyrics), webmocks NOT leaked into Android bundle, same keystore → in-place upgrade over v2.x
 - The app now matches real Spotify Android A-to-Z on every core surface, pixel-verified against genuine references
 - Reminder: user rotates GitHub token after session
+
+---
+Task ID: 6
+Agent: Super Z (main agent)
+Task: v2.4 — repo-faithful Spotify UI rebuild (user brief: clone + study francoborrelli/spotify-react-web-client, replicate the complete UI to actually look like Spotify, verify everything, don't break anything, run the gauntlet)
+
+Work Log:
+- Cloned https://github.com/francoborrelli/spotify-react-web-client to /home/z/spotify-ref; studied complete repo: 14 UI screenshots, SCSS design tokens (variables.scss, App.scss, home.scss, PlayingBar.scss, CirclePlay.scss), all key components (GridCards, Chip, mobilePlayer, PlayCircle, BrowseCard, Playlist/Artist headers, PageHeader, imageAnyliser)
+- Extracted design DNA: bg #121212, surfaces #282828, secondary text #B3B3B3, ACTIVE CHIP = WHITE bg + #2A2929 text (not green!), inactive chips hsla(0,0%,100%,.1), play FAB #1ED760 w/ 0 8px 8px shadow, home gradient wash linear-gradient(pageColor 2%, #121212 11%) where pageColor = artwork dominant darkened-only-if-light, mini player gradient linear-gradient(color, #121212), quick tiles = 48px horizontal cards 10% white on the wash, playlist meta "N songs, X min"
+- Pixel-measured reference Mobile.png: black header → SHARP color onset #cd6430 (HSL 19,63,50) below header → gradual fade across ~35% viewport; onset spans through quick-tiles region
+- VLM gap analysis vs my v2.3 app confirmed user's verdict: flat dark app, wrong chips, flat mini player ("generic dark mode template")
+- theme.ts: +chipActiveBg #FFFFFF / chipActiveText #2A2929 / chipInactiveBg 10% white / fabGreen #1ED760 / fabShadow
+- dynamic.ts: +`wash` palette token (mid-tone dominant, sat floor .42, lightness clamp .38–.52) — the repo-faithful wash color
+- HomeScreen: artwork-derived gradient wash (colors=[wash,wash,#121212] locations=[0,.16,1], top=header height, height=38% viewport) from first mix/trending/recent artwork; white-active chips; QuickTile → 10% white translucent on wash (54px, title-only 2 lines); contextId tracked per play call; green play-FAB overlay renders on the playing-context shelf card (repo .circle-play-div.active behavior)
+- MiniPlayer: full rewrite — LinearGradient [palette.wash → #121212] card (repo mobilePlayer formula), art + bold title + gray artist, queue/heart/play buttons (repo order), 3px white-on-black24% progress line; queue button navigates Player w/ openQueue param → queue sheet auto-opens (PlayerScreen reads route param)
+- PlayerScreen: gradient now boostForPlayer(palette.dominant) → palette.wash → #121212 (dominant hue, not vibrant); PERSISTENT white thumb dot on progress bar; play/pause → big plain 56px WHITE glyph, no circle (real Spotify Android); spinner recolored white
+- CollectionScreen: meta "7 songs, 26 min" (fmtTotal, no bitrate); playQueue passes contextId
+- TrackRow: artist-only subtitle (no album — real Spotify mobile rows)
+- LibraryScreen chips → white-active pills; SearchScreen already at spec
+- PlayerProvider: +contextId state (playQueue 3rd arg) so any surface knows the playing collection
+- WEB GAUNTLET (expo web harness + agent-browser at 412×915): screenshotted home/search/library/liked/player/queue-sheet/AI/stats; VLM-audited each against repo references across 5 iterations:
+  r1 45/100 → r2 72 → r3 95 (home) after wash geometry fix; final: Home 92-95, Liked 90-95, Library 95, Search 88-92, Player 85-88 (pre play-glyph fix, then confirmed fixed via zoom), AI 94, Stats 91
+- Investigated VLM's "Your Librarv" truncation claim → FALSE ALARM (DOM text fits at 56px/137px, Figtree-500 loaded; low-DPI glyph misread)
+- Gates: tsc --noEmit CLEAN; Android Metro export CLEAN (2.9MB hbc); bundle markers chipActiveBg/fabGreen/openQueue/contextId FOUND; webmocks NOT leaked; committed cae2c41 (11 files, +269/−88); pushed main + tag v2.4.0
+
+Stage Summary:
+- v2.4.0 SHIPPING: the app now wears the reference repo's exact design language — gradient washes, white-active pills, translucent tiles, gradient mini player, plain-white play glyph
+- CI: v2.4.0 tag run in progress at commit time (monitor to green)
+- All playback/AI/safety/download logic untouched — pure UI layer + contextId tracking
+- Reminder: user rotates GitHub token after session
