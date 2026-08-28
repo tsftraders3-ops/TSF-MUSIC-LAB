@@ -1,133 +1,50 @@
-# TSF Music 🎵
+# TSF Music — Native
 
-**Spotify-grade personal music streaming — your server, your library, full-length tracks, AI playlists, native Android app.**
+A **completely standalone** cross-platform music streaming app, rebuilt in
+React Native (Expo). No server, no URLs to configure, no setup — install the
+APK and it works.
 
-Single-user, dark-only music app. No login, no ads, no accounts. A Next.js
-server (runs on your laptop / Mac / VPS) resolves and streams real full-length
-audio; phones (Android app + any browser) connect to it over Wi-Fi or VPN.
-A GitHub Actions pipeline compiles the installable Android APK for you.
+## What changed from v1
 
-```
-┌────────────────────────── your machine ──────────────────────────┐
-│  TSF Server (Next.js + Prisma/SQLite)                            │
-│   ├─ JioSaavn provider ──── 320 kbps AAC, full length (regional) │
-│   ├─ yt-dlp subprocess ─── full-length international tracks      │
-│   ├─ iTunes preview ────── 30s preview fallback                  │
-│   └─ offline synth ─────── audible fallback when offline         │
-│   + AI playlist engine (token-streaming SSE, first track ≈1s)    │
-└───────────────┬──────────────────────────┬───────────────────────┘
-        http://lan-ip:3000         Capacitor native shell
-        ▲                                   ▲
-   any browser                        TSF Music Android app
-  (Chrome/Safari)                     (built by GitHub Actions)
-```
+v1 wrapped the web app in a Capacitor WebView that pointed at a hosted
+Next.js server — away from that server it could only show a blank screen.
+v2 is a **real native app**: the music stack runs entirely on the device.
 
-## Quick start (server)
+- **JioSaavn catalog, on-device**: search, trending charts and 320 kbps AAC
+  stream URLs (DES-ECB decrypted locally with pure-JS crypto) fetched
+  directly by the app — React Native has no CORS restrictions.
+- **iTunes fallback**: international gaps are topped up with 30-second
+  previews, clearly badged.
+- **Native audio engine** (react-native-track-player): background playback,
+  notification + lock-screen controls, headphone handling, automatic
+  recovery when a stream URL goes stale.
+- **Offline downloads**: save any song to the app's private storage from
+  the player screen; the queue automatically prefers the local file.
+- **Your library, on device**: favorites, play history and recent searches
+  in AsyncStorage — private, no account.
+
+## Stack
+
+Expo SDK 52 · React Native 0.76 · react-native-track-player ·
+react-navigation v7 · AsyncStorage · crypto-js · expo-file-system
+
+## Build
+
+GitHub Actions builds a signed release APK on every push to `main`
+(`.github/workflows/native-android.yml`). The signing keystore lives in
+GitHub Secrets — same identity as v1, so v2 upgrades in place. Tag `v*`
+to publish a GitHub Release.
+
+Local dev:
 
 ```bash
-bun install          # npm is NOT recommended; bun.lock is canonical
-bun run dev          # prisma db push + next dev on :3000
+bun install
+bunx expo start          # Metro
+bunx expo run:android    # build & run on device/emulator
 ```
 
-Open `http://localhost:3000`. For phones on the same Wi-Fi, use your LAN IP
-(`ipconfig getifaddr en0` on macOS) and see *Android app* below.
+iOS: the codebase is cross-platform (`expo run:ios`); an Apple Developer
+account + build cloud (or Mac) is required to produce an IPA.
 
-Optional, for full-length international tracks: `brew install yt-dlp`
-(the server discovers the binary automatically).
-
-## The Android app
-
-The repo ships a **Capacitor** native shell (`android/`). The APK boots a
-**bundled launcher** (`mobile-shell/`) that finds your TSF server at runtime
-(saved address → baked default → manual entry) and then loads the full app
-from it — every feature (search, full-length streaming, AI playlists, likes,
-library) works exactly as in Chrome, with a real app icon, splash screen and
-no browser UI.
-
-**Why a launcher?** If the server is unreachable (Mac asleep, IP changed,
-phone on mobile data), the app shows a friendly "can't reach your server"
-screen with a checklist and a manual address box — never a black screen. It
-auto-retries every few seconds and reconnects the moment your server comes
-back. The server URL you enter manually is remembered (per-app storage), so
-DHCP address changes are a one-time fix, not a rebuild.
-
-**Build it without installing anything locally** — GitHub Actions does it:
-
-1. Go to **Actions → Build Android APK → Run workflow** (or push a `v*` tag).
-2. Download the `tsf-music-android` artifact (debug + signed release APK).
-3. Sideload `app-release.apk` onto your phone ("install unknown apps").
-
-The default server address baked into the launcher comes from the
-`TSF_SERVER_URL` repository secret (default `http://10.125.110.1:3000`).
-Change the secret → rebuild → new APK tries the new address first. Signing is
-fully automated via repository secrets (`ANDROID_KEYSTORE_*`), so every
-release APK upgrades cleanly over the previous one — no uninstall/reinstall.
-
-> LAN HTTP note: Android 9+ blocks cleartext traffic by default; the shell's
-> manifest already sets `usesCleartextTraffic="true"` for this reason.
-
-## Features
-
-### Streaming core
-- **Full-length audio** via a ranked, fail-fast provider race:
-  JioSaavn (320 kbps AAC, artist-gated, language-blocklisted) →
-  yt-dlp (multi-client retry) → iTunes 30s preview → offline synth.
-- **Honest quality badges** in the player: emerald = full-length,
-  amber = 30s preview, slate = offline synth. No silent degradation.
-- **Byte-proxy streaming** (`?proxy=1` on phones): same-origin 206 Range
-  passthrough — sidesteps WebKit/WebView CORS + redirect fragility.
-- **SponsorBlock auto-skip**, self-healing stale-URL cache, background
-  cache warming, ranked cache precedence (full-length rows always win).
-- **MediaSession** lock-screen/notification controls + scrubber.
-
-### AI layer
-- **AI Playlist Generator** — natural-language prompt → 10/25/40-track
-  playlist, token-streamed over SSE: first track ≈1s, full ≈6s, repeat
-  ≈50ms (24h prompt cache). Live-growing animated track list.
-- **Discover Weekly / Release Radar / Daylist / On Repeat** —
-  deterministic, metadata-driven, no-LLM-required personalization.
-
-### App shell
-- Spotify-class dark UI: ambient drifting artwork, glass topbar, spring
-  motion, shimmer skeletons, staggered shelf entrances.
-- Mobile-first: bottom nav, mini-player, swipe-up fullscreen player,
-  bottom-sheet queue, safe-area aware.
-- Onboarding (name / artists / genres) → personalized home.
-
-## Repo layout
-
-```
-src/                 app code (Next.js App Router)
-  app/api/           stream, download, health, ai/*, ytm/*, library/*, …
-  components/        views, player, shell, ai, onboarding
-  lib/               ai engine, jiosaavn, ytdlp, stream resolver, synth
-  store/             zustand player/nav/library/preferences
-android/             Capacitor native shell (committed, CI-buildable)
-mobile-shell/        bundled launcher (server discovery + friendly error UI)
-assets/              1024px icon/splash sources (@capacitor/assets)
-scripts/             gauntlets, benchmarks, evidence tooling
-docs/                research notes
-capacitor.config.json  native shell config (allowNavigation, cleartext)
-```
-
-## CI / CD
-
-| Workflow | What it does |
-|---|---|
-| `ci.yml` | install → typecheck → production build on every push/PR |
-| `android.yml` | capacitor sync → gradle → **signed release APK** + debug APK artifacts; tagged `v*` builds also publish a GitHub Release |
-
-## Honest limits
-
-- The Android WebView does not implement the MediaSession API —
-  background playback of the *current* track works, lock-screen controls
-  need the Chrome/PWA path or a future native audio bridge.
-- International full-length tracks need `yt-dlp` on the server machine.
-- The server must be reachable from the phone (same Wi-Fi, or Tailscale).
-
-## Documentation
-
-- `MOBILE-SOLUTION.md` — the full mobile research + implementation story
-- `MOBILE-PROGRESS.md` — phase tracker with critic scores
-- `QA-REPORT-2026-08-27.md` — field QA trail
-- `docs/full-length-audio-research.md` — the YouTube SABR blocker analysis
+The legacy web/WebView implementation is preserved on the `legacy-web`
+branch.

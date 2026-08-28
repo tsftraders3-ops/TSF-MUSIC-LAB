@@ -1,51 +1,90 @@
-'use client'
+import React from 'react';
+import { Image, StyleSheet, View, type StyleProp, type ImageStyle } from 'react-native';
+import { colors, radius } from '../theme';
 
-/**
- * TSF Music — Artwork with graceful degradation.
- *
- * Real Spotify never shows a broken-image glyph or alt text: a missing cover
- * renders as a dark gradient tile with a music-note mark. This component
- * centralizes that behavior (fixes the "broken image assets" critic gap).
- */
+const GRADIENTS: Array<[string, string]> = [
+  ['#7C4DFF', '#00E5FF'],
+  ['#FF4D9D', '#7C4DFF'],
+  ['#00E5FF', '#1DB954'],
+  ['#FF8A00', '#E52E71'],
+  ['#4D79FF', '#7C4DFF'],
+];
 
-import { useState } from 'react'
-import { Music2 } from 'lucide-react'
+function gradientFor(seed: string): [string, string] {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return GRADIENTS[h % GRADIENTS.length];
+}
 
 export function Artwork({
-  src,
-  alt = '',
-  className = '',
-  rounded = '',
-  iconSize = 22,
+  uri,
+  seed,
+  size,
+  style,
 }: {
-  src?: string | null
-  alt?: string
-  className?: string
-  rounded?: string
-  iconSize?: number
+  uri?: string;
+  seed: string;
+  size: number;
+  style?: StyleProp<ImageStyle>;
 }) {
-  const [failed, setFailed] = useState(false)
-  const usable = src && !failed && src.trim() !== ''
-
-  if (!usable) {
+  const [failed, setFailed] = React.useState(false);
+  const [a, b] = gradientFor(seed);
+  if (!uri || failed) {
     return (
-      <div
-        className={`bg-gradient-to-br from-[#3a3a3a] to-[#1c1c1c] flex items-center justify-center shrink-0 ${className} ${rounded}`}
-        aria-hidden
+      <View
+        style={[
+          styles.fallback,
+          {
+            width: size,
+            height: size,
+            borderRadius: Math.max(radius.sm, size * 0.08),
+            backgroundColor: a,
+          },
+          style,
+        ]}
       >
-        <Music2 size={iconSize} className="text-white/25" />
-      </div>
-    )
+        <View style={[styles.fallbackInner, { borderColor: b }]} />
+        <View style={[styles.noteDot, { backgroundColor: b }]} />
+      </View>
+    );
   }
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt={alt}
-      className={`shrink-0 ${className} ${rounded}`}
-      loading="lazy"
-      referrerPolicy="no-referrer"
+    <Image
+      source={{ uri }}
+      style={[
+        styles.image,
+        {
+          width: size,
+          height: size,
+          borderRadius: Math.max(radius.sm, size * 0.08),
+        },
+        style,
+      ]}
       onError={() => setFailed(true)}
     />
-  )
+  );
 }
+
+const styles = StyleSheet.create({
+  image: { backgroundColor: colors.surface },
+  fallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fallbackInner: {
+    width: '46%',
+    height: '46%',
+    borderRadius: 999,
+    borderWidth: 2,
+    opacity: 0.85,
+  },
+  noteDot: {
+    position: 'absolute',
+    bottom: '24%',
+    right: '24%',
+    width: '10%',
+    height: '10%',
+    borderRadius: 999,
+    opacity: 0.9,
+  },
+});
