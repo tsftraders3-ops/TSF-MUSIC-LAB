@@ -37,10 +37,13 @@ export const colors = {
   accentDeep: '#000000', // black-on-green text/icons
   danger: '#E91429',
 
-  // filter chips — current Spotify Android: WHITE active pill, near-black text
-  chipActiveBg: '#FFFFFF',
-  chipActiveText: '#191919',
+  // filter chips — current Spotify Android: GREEN active pill + BLACK text
+  // (pixel-verified on genuine 2024/25 refs: bg #20d361, text #0b1e0e).
+  // HOME inactive = filled #282828; LIBRARY inactive = ghost outline #808080
+  chipActiveBg: '#1ED760',
+  chipActiveText: '#000000',
   chipInactiveBg: '#282828',
+  chipGhostBorder: '#808080', // library outlined chips (pixel-sampled)
 
   // AI identity — signature violet→cyan
   aiStart: '#7C4DFF',

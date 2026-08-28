@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaFrame } from 'react-native-safe-area-context';
 import type { Playlist, Track } from '../types';
 import { usePlayer } from '../player/PlayerProvider';
 import {
@@ -62,6 +63,7 @@ export function LibraryScreen() {
 
   const [chip, setChip] = useState<Chip>('playlists');
   const [sortRecent, setSortRecent] = useState(true);
+  const [grid, setGrid] = useState(false); // genuine Spotify grid/list view toggle
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [favorites, setFavorites] = useState<Track[]>([]);
   const [downloads, setDownloads] = useState<Track[]>([]);
@@ -304,6 +306,66 @@ export function LibraryScreen() {
     );
   };
 
+  /* Grid view — genuine Spotify library grid: 2-col cover tiles. */
+  const { width: frameWidth } = useSafeAreaFrame();
+  const gridCell = Math.floor((frameWidth - 16 * 2 - 12) / 2);
+  const renderGridItem = ({ item }: { item: LibItem }) => {
+    const onCellPress = () => {
+      if (item.kind === 'liked') return openCollection('Liked Songs', item.tracks ?? []);
+      if (item.kind === 'stats') return nav.navigate('Stats');
+      if (item.playlistId) return nav.navigate('Playlist', { playlistId: item.playlistId });
+      if (item.kind === 'artist')
+        return nav.navigate('Collection', {
+          collection: {
+            id: `artist-${item.title}`,
+            title: item.title,
+            subtitle: 'Artist',
+            artwork: '',
+            kind: 'search',
+            query: item.title,
+          },
+        });
+      if (item.kind === 'album' || item.kind === 'track')
+        return nav.navigate('Collection', {
+          collection: {
+            id: `local-${item.title}`,
+            title: item.title,
+            artwork: item.artwork ?? '',
+          },
+          tracks: item.tracks ?? [],
+        });
+      openCollection(item.title, item.tracks ?? []);
+    };
+    return (
+      <PressableScale haptic scaleTo={0.97} style={{ width: gridCell, gap: 8 }} onPress={onCellPress}>
+        {item.kind === 'liked' ? (
+          <Artwork seed="liked" size={gridCell} liked variant="rounded" />
+        ) : item.kind === 'stats' ? (
+          <View style={[styles.statsTile, { width: gridCell, height: gridCell }]}>
+            <Ionicons name="pulse-outline" size={40} color="#fff" />
+          </View>
+        ) : item.kind === 'ai' ? (
+          <View style={[styles.aiTile, { width: gridCell, height: gridCell }]}>
+            <Ionicons name="sparkles" size={38} color="#fff" />
+          </View>
+        ) : (
+          <Artwork
+            uri={item.artwork}
+            seed={item.seed}
+            size={gridCell}
+            variant={item.circle ? 'circle' : 'rounded'}
+          />
+        )}
+        <Text style={styles.gridTitle} numberOfLines={1}>
+          {item.title}
+        </Text>
+        <Text style={styles.gridSub} numberOfLines={1}>
+          {item.subtitle}
+        </Text>
+      </PressableScale>
+    );
+  };
+
   const emptyCopy: Record<Chip, { title: string; sub: string }> = {
     playlists: {
       title: 'Create your first playlist',
@@ -336,7 +398,7 @@ export function LibraryScreen() {
         </View>
       </View>
 
-      {/* filter chips (Spotify gray pills) */}
+      {/* filter chips — genuine Library style: ghost outline, green active */}
       <View style={styles.chips}>
         {(['playlists', 'artists', 'albums', 'downloaded'] as Chip[]).map((t) => (
           <Pressable
@@ -357,20 +419,39 @@ export function LibraryScreen() {
         ))}
       </View>
 
-      {/* sort row */}
+      {/* sort row + grid/list view toggle (genuine Spotify) */}
       <View style={styles.sortRow}>
         <PressableScale hitSlop={8} haptic onPress={() => setSortRecent((v) => !v)} style={styles.sortBtn}>
           <Ionicons name="swap-vertical" size={15} color={colors.textDim} />
           <Text style={styles.sortText}>{sortRecent ? 'Recent' : 'Alphabetical'}</Text>
           <Ionicons name="chevron-down" size={13} color={colors.textDim} />
         </PressableScale>
+        <PressableScale
+          hitSlop={8}
+          haptic
+          onPress={() => setGrid((v) => !v)}
+          style={styles.viewToggle}
+          accessibilityLabel={grid ? 'Switch to list view' : 'Switch to grid view'}
+        >
+          <Ionicons
+            name={grid ? 'list' : 'grid'}
+            size={18}
+            color={colors.text}
+          />
+        </PressableScale>
       </View>
 
       <FlatList
         data={items}
         keyExtractor={(i) => i.key}
-        renderItem={renderItem}
-        contentContainerStyle={{ paddingBottom: 170, flexGrow: 1 }}
+        renderItem={grid ? renderGridItem : renderItem}
+        numColumns={grid ? 2 : 1}
+        key={grid ? 'grid' : 'list'}
+        columnWrapperStyle={grid ? { gap: 12, paddingHorizontal: 16 } : undefined}
+        contentContainerStyle={
+          grid ? { paddingBottom: 170, gap: 14, paddingTop: 4 } : { paddingBottom: 170, flexGrow: 1 }
+        }
+        ListFooterComponent={<Text style={styles.version}>Version 2.5.0</Text>}
         ListEmptyComponent={
           chip === 'playlists' ? null : (
             <View style={styles.empty}>
@@ -522,19 +603,47 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     paddingHorizontal: 13,
     paddingVertical: 7,
-    backgroundColor: colors.card, // Spotify chip gray
+    // genuine Library chips: ghost outline, transparent fill
+    borderWidth: 1,
+    borderColor: colors.chipGhostBorder,
+    backgroundColor: 'transparent',
   },
-  chipActive: { backgroundColor: colors.chipActiveBg },
+  chipActive: {
+    backgroundColor: colors.chipActiveBg,
+    borderWidth: 1,
+    borderColor: colors.chipActiveBg,
+  },
   chipText: { color: colors.text, fontSize: 13, fontWeight: '600', fontFamily: fonts.semibold },
   chipTextActive: { color: colors.chipActiveText },
   sortRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
   },
   sortBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4 },
   sortText: { color: colors.textDim, fontSize: 13, fontFamily: fonts.medium },
+  viewToggle: { padding: 6 },
+  version: {
+    color: colors.textFaint,
+    fontSize: 11,
+    fontFamily: fonts.regular,
+    textAlign: 'center',
+    marginTop: 18,
+  },
+  gridTitle: {
+    color: colors.text,
+    fontSize: 13.5,
+    fontWeight: '700',
+    fontFamily: fonts.bold,
+  },
+  gridSub: {
+    color: colors.textDim,
+    fontSize: 12.5,
+    fontFamily: fonts.regular,
+    marginTop: -4,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

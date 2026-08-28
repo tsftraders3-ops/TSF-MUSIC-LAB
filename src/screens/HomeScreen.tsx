@@ -1,10 +1,12 @@
 /**
  * Home — authentic Spotify Android home architecture:
  *
- *   filter chips (All / Music / AI — green active) + profile avatar →
- *   2-column quick-shortcut grid (#2A2A2A tiles) → Made for you (AI Daily
- *   Mixes + create-with-AI card) → Jump back in (recents) → Trending now
- *   (safety-filtered) → Because you listened (artist radios) → charts.
+ *   profile avatar (far left) + filter chips (All / Music / AI — green
+ *   active pill w/ black text) → 8-tile 2-column quick-shortcut grid
+ *   (#2A2A2A, 56px, art flush-left) → Made for you (AI Daily Mixes +
+ *   create-with-AI card) → Jump back in (recents, "Album • Artist"
+ *   subtitles) → Trending now (safety-filtered) → Because you listened
+ *   (artist radios) → charts.
  *
  * Everything algorithmic passes the content-safety filter, so nothing
  * explicit ever lands on this screen uninvited.
@@ -39,7 +41,7 @@ import { PressableScale } from '../components/PressableScale';
 import { colors, fonts, radius, spacing } from '../theme';
 import type { RootStackParamList } from './navigation';
 
-type Chip = 'all' | 'music';
+type Chip = 'all' | 'music' | 'ai';
 
 export function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -127,6 +129,58 @@ export function HomeScreen() {
   const loading = mixes === null && trending === null;
   const showAI = chip !== 'music'; // AI surfaces under All + AI chips
 
+  /* Spotify's 8-tile shortcut grid: pinned first (Liked Songs), then
+   * mixes, trending, recents, and the AI tile filling slot 8. */
+  const quickTiles: Array<{
+    title: string;
+    subtitle?: string;
+    artwork?: string;
+    seed: string;
+    icon?: keyof typeof Ionicons.glyphMap;
+    liked?: boolean;
+    onPress: () => void;
+  }> = [];
+  if (favorites.length > 0)
+    quickTiles.push({
+      title: 'Liked Songs',
+      seed: 'liked-songs',
+      liked: true,
+      onPress: () => openTrackCollection('Liked Songs', favorites),
+    });
+  if (hasMixes)
+    mixes!.slice(0, 2).forEach((m) =>
+      quickTiles.push({
+        title: m.title,
+        artwork: m.artwork,
+        seed: m.id,
+        onPress: () => openTrackCollection(m.title, m.tracks),
+      }),
+    );
+  if (trending && trending.length > 0)
+    quickTiles.push({
+      title: 'Trending now',
+      subtitle: 'Hot hits',
+      artwork: trending[0].artwork,
+      seed: 'trending',
+      onPress: () => openTrackCollection('Trending now', trending),
+    });
+  recents.slice(0, 3).forEach((t) =>
+    quickTiles.push({
+      title: t.title,
+      artwork: t.artwork,
+      seed: `recent-${t.id}`,
+      onPress: () => play(recents, Math.max(0, recents.findIndex((r) => r.id === t.id))),
+    }),
+  );
+  if (quickTiles.length > 0)
+    quickTiles.push({
+      title: 'Create with AI',
+      seed: 'ai-tile',
+      icon: 'sparkles',
+      onPress: () => nav.navigate('AI'),
+    });
+  const quickTileList = quickTiles.slice(0, 8);
+
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <ScrollView
@@ -144,23 +198,8 @@ export function HomeScreen() {
           />
         }
       >
-        {/* ── Header: filter chips + profile avatar (Spotify layout) ── */}
+        {/* ── Header: avatar far-left + chips (genuine Spotify order) ── */}
         <View style={styles.header}>
-          <View style={styles.chipRow}>
-            {(['all', 'music'] as Chip[]).map((c) => (
-              <PressableScale
-                key={c}
-                scaleTo={0.94}
-                haptic
-                onPress={() => setChip(c)}
-                style={[styles.chip, chip === c && styles.chipActive]}
-              >
-                <Text style={[styles.chipText, chip === c && styles.chipTextActive]}>
-                  {c === 'all' ? 'All' : 'Music'}
-                </Text>
-              </PressableScale>
-            ))}
-          </View>
           <PressableScale
             scaleTo={0.92}
             haptic
@@ -169,6 +208,21 @@ export function HomeScreen() {
           >
             <Text style={styles.avatarText}>T</Text>
           </PressableScale>
+          <View style={styles.chipRow}>
+            {(['all', 'music', 'ai'] as Chip[]).map((c) => (
+              <PressableScale
+                key={c}
+                scaleTo={0.94}
+                haptic
+                onPress={() => setChip(c)}
+                style={[styles.chip, chip === c && styles.chipActive]}
+              >
+                <Text style={[styles.chipText, chip === c && styles.chipTextActive]}>
+                  {c === 'all' ? 'All' : c === 'music' ? 'Music' : 'AI'}
+                </Text>
+              </PressableScale>
+            ))}
+          </View>
         </View>
 
         {offline ? (
@@ -178,47 +232,22 @@ export function HomeScreen() {
           </View>
         ) : null}
 
-        {/* ── Quick shortcuts — Spotify #2A2A2A tiles ─────────────────── */}
-        {(favorites.length > 0 || recents.length > 0 || hasMixes) && (
+        {/* ── Quick shortcuts — Spotify 8-tile grid, #2A2A2A ──────────── */}
+        {quickTileList.length > 0 && (
           <View style={styles.quickGrid}>
-            {favorites.length > 0 ? (
+            {quickTileList.map((t) => (
               <QuickTile
-                title="Liked Songs"
-                subtitle={`Playlist · ${favorites.length} songs`}
-                seed="liked-songs"
+                key={t.seed}
+                title={t.title}
+                subtitle={t.subtitle}
+                artwork={t.artwork}
+                seed={t.seed}
+                icon={t.icon}
+                liked={t.liked}
                 width={quickTileWidth()}
-                onPress={() => openTrackCollection('Liked Songs', favorites)}
-                liked
+                onPress={t.onPress}
               />
-            ) : null}
-            {hasMixes ? (
-              <QuickTile
-                title="Daily Mix 1"
-                artwork={mixes![0].artwork}
-                seed={mixes![0].id}
-                width={quickTileWidth()}
-                onPress={() => openTrackCollection('Daily Mix 1', mixes![0].tracks)}
-              />
-            ) : null}
-            {trending && trending.length > 0 ? (
-              <QuickTile
-                title="Trending now"
-                subtitle="Hot hits right now"
-                artwork={trending[0].artwork}
-                seed="trending"
-                width={quickTileWidth()}
-                onPress={() => openTrackCollection('Trending now', trending)}
-              />
-            ) : null}
-            {recents.length > 0 ? (
-              <QuickTile
-                title={recents[0].title}
-                artwork={recents[0].artwork}
-                seed={`recent-${recents[0].id}`}
-                width={quickTileWidth()}
-                onPress={() => play(recents, 0)}
-              />
-            ) : null}
+            ))}
           </View>
         )}
 
@@ -251,7 +280,7 @@ export function HomeScreen() {
                   <ShelfCard
                     key={t.id}
                     title={t.title}
-                    subtitle={t.artist}
+                    subtitle={t.album ? `Album · ${t.artist}` : t.artist}
                     artwork={t.artwork}
                     seed={t.id}
                     size={150}
@@ -272,7 +301,7 @@ export function HomeScreen() {
                   <ShelfCard
                     key={t.id}
                     title={t.title}
-                    subtitle={t.artist}
+                    subtitle={t.album ? `Album · ${t.artist}` : t.artist}
                     artwork={t.artwork}
                     seed={t.id}
                     size={150}
@@ -393,7 +422,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 10,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.md,
@@ -405,14 +434,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 7,
   },
-  chipActive: { backgroundColor: colors.chipActiveBg }, // white pill (pixel-verified on real Spotify)
+  chipActive: { backgroundColor: colors.chipActiveBg }, // green pill (pixel-verified on real Spotify)
   chipText: {
     color: colors.text,
     fontSize: 13,
     fontWeight: '700',
     fontFamily: fonts.bold,
   },
-  chipTextActive: { color: colors.chipActiveText }, // near-black on white
+  chipTextActive: { color: colors.chipActiveText }, // black on green (genuine)
   avatar: {
     width: 34,
     height: 34,

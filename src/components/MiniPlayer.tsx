@@ -1,8 +1,8 @@
 /**
  * MiniPlayer — authentic Spotify Android mini player:
  * a #282828 rounded card floating above the tab bar: square artwork,
- * bold white single-line title, heart + play controls, thin progress
- * line along the card's bottom edge. Tapping opens Now Playing.
+ * bold white single-line "Title • Artist", heart + play controls, thin
+ * progress line along the card's bottom edge. Tapping opens Now Playing.
  */
 
 import React from 'react';
@@ -33,7 +33,7 @@ export function MiniPlayer() {
       >
         <Artwork uri={active.artwork} seed={active.id} size={40} variant="mini" />
         <Text style={styles.title} numberOfLines={1}>
-          {active.title}
+          {active.title} • {active.artist}
         </Text>
 
         <Pressable

@@ -14,11 +14,13 @@ import { HomeScreen } from './src/screens/HomeScreen';
 import { SearchScreen } from './src/screens/SearchScreen';
 import { AIScreen } from './src/screens/AIScreen';
 import { LibraryScreen } from './src/screens/LibraryScreen';
+import { PremiumScreen } from './src/screens/PremiumScreen';
 import { CollectionScreen } from './src/screens/CollectionScreen';
 import { PlaylistScreen } from './src/screens/PlaylistScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
 import { PlayerScreen } from './src/screens/PlayerScreen';
 import { DynamicThemeProvider } from './src/theme/DynamicThemeProvider';
+import { WhatsNewDialog } from './src/components/WhatsNewDialog';
 import type { RootStackParamList, TabParamList } from './src/screens/navigation';
 import { colors } from './src/theme';
 
@@ -41,7 +43,8 @@ const Tab = createBottomTabNavigator<TabParamList>();
 
 /**
  * Tabs — authentic Spotify Android shell: full-width pure-black bottom bar
- * (3 tabs), content on #121212, mini player card floating above the bar.
+ * (4 tabs incl. Premium), content on #121212, mini player card floating
+ * above the bar.
  */
 function TabsScreen() {
   const insets = useSafeAreaInsets();
@@ -63,6 +66,7 @@ function TabsScreen() {
           },
           tabBarLabelStyle: styles.tabLabel,
           tabBarIcon: ({ color, focused }) => {
+            if (route.name === 'Premium') return <SpotifyMark size={22} color={color} />;
             const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
               Home: focused ? 'home' : 'home-outline',
               Search: 'search',
@@ -79,11 +83,46 @@ function TabsScreen() {
           component={LibraryScreen}
           options={{ tabBarLabel: 'Your Library' }}
         />
+        <Tab.Screen
+          name="Premium"
+          component={PremiumScreen}
+          options={{ tabBarLabel: 'Premium' }}
+        />
       </Tab.Navigator>
       {/* Spotify mini player: rounded #282828 card floating above the bar */}
       <View style={[styles.miniWrap, { bottom: 58 + insets.bottom + 6 }]}>
         <MiniPlayer />
       </View>
+    </View>
+  );
+}
+
+/** Spotify-style logo mark for the Premium tab (circle + 3 arcs). */
+function SpotifyMark({ size, color }: { size: number; color: string }) {
+  const barW = [size * 0.52, size * 0.38, size * 0.26];
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Math.max(1.5, size * 0.09),
+      }}
+    >
+      {barW.map((w, i) => (
+        <View
+          key={i}
+          style={{
+            width: w,
+            height: Math.max(1.6, size * 0.11),
+            borderRadius: 99,
+            backgroundColor: color,
+            alignSelf: 'center',
+          }}
+        />
+      ))}
     </View>
   );
 }
@@ -113,6 +152,7 @@ export default function App() {
           <DynamicThemeProvider>
             <NavigationContainer theme={navTheme}>
               <StatusBar style="light" backgroundColor={colors.bg} />
+              <WhatsNewDialog />
               <Stack.Navigator
                 screenOptions={{
                   headerShown: false,
