@@ -78,7 +78,7 @@ jobs:
           ls -la android/app/tsf-release.keystore
 
       - name: Patch gradle for release signing
-        run: node scripts/patch-android-signing.mjs
+        run: node ci/patch-android-signing.mjs
 
       - uses: actions/setup-java@v4
         with:
