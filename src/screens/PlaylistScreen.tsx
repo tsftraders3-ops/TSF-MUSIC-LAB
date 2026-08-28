@@ -20,6 +20,8 @@ import { PressableScale } from '../components/PressableScale';
 import { TrackMenu } from '../components/TrackMenu';
 import { useToast } from '../components/Toast';
 import { colors, fonts, radius, spacing } from '../theme';
+import { useTrackPalette } from '../theme/DynamicThemeProvider';
+import { withAlpha } from '../theme/dynamic';
 import type { RootStackParamList } from './navigation';
 
 export function PlaylistScreen() {
@@ -89,8 +91,24 @@ export function PlaylistScreen() {
     nav.navigate('Player');
   };
 
+  // playlists wear their own cover's colors
+  const palette = useTrackPalette(
+    playlist.aiGenerated ? undefined : playlist.tracks[0]?.artwork,
+    playlist.id,
+  );
+
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
+      {/* tinted header wash */}
+      <LinearGradient
+        colors={[
+          withAlpha(playlist.aiGenerated ? '#7C4DFF' : palette.deep, 0.92),
+          withAlpha(playlist.aiGenerated ? '#7C4DFF' : palette.deep, 0.35),
+          'rgba(10,11,14,0)',
+        ]}
+        style={styles.headerWash}
+        pointerEvents="none"
+      />
       <View style={styles.topBar}>
         <PressableScale hitSlop={12} onPress={() => nav.goBack()}>
           <Ionicons name="chevron-back" size={26} color={colors.text} />
@@ -130,12 +148,15 @@ export function PlaylistScreen() {
             <View style={styles.actions}>
               <PressableScale
                 haptic
-                style={styles.playBtn}
+                style={[
+                  styles.playBtn,
+                  { backgroundColor: playlist.aiGenerated ? colors.accentBright : palette.glow },
+                ]}
                 onPress={() => play(0)}
                 disabled={!playlist.tracks.length}
               >
-                <Ionicons name="play" size={21} color={colors.accentDeep} />
-                <Text style={styles.playBtnText}>Play</Text>
+                <Ionicons name="play" size={21} color="#07080B" />
+                <Text style={[styles.playBtnText, { color: '#07080B' }]}>Play</Text>
               </PressableScale>
               <PressableScale
                 haptic
@@ -180,6 +201,10 @@ export function PlaylistScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  headerWash: {
+    ...StyleSheet.absoluteFillObject,
+    bottom: '55%',
+  },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -205,7 +230,7 @@ const styles = StyleSheet.create({
   aiArt: {
     width: 188,
     height: 188,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -223,17 +248,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    backgroundColor: colors.accentBright,
     borderRadius: radius.full,
     paddingHorizontal: spacing.xl,
     paddingVertical: 12,
   },
-  playBtnText: { color: colors.accentDeep, fontSize: 15, fontWeight: '800', fontFamily: fonts.extrabold },
+  playBtnText: { fontSize: 15, fontWeight: '800', fontFamily: fonts.extrabold },
   shuffleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    backgroundColor: colors.card,
+    backgroundColor: colors.glass,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
     borderRadius: radius.full,
     paddingHorizontal: spacing.lg + 4,
     paddingVertical: 12,

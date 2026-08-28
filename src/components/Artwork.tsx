@@ -43,7 +43,11 @@ export function Artwork({
   const [failed, setFailed] = React.useState(false);
   const [a, b] = gradientFor(seed);
   const borderRadius =
-    variant === 'circle' ? size / 2 : variant === 'card' ? Math.max(6, size * 0.085) : Math.max(4, size * 0.055);
+    variant === 'circle'
+      ? size / 2
+      : variant === 'card'
+        ? Math.max(8, size * 0.104)
+        : Math.max(5, size * 0.062);
 
   if (!uri || failed) {
     return (

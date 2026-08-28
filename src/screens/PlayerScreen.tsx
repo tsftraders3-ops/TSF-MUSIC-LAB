@@ -1,13 +1,20 @@
 /**
- * Player v2 — the full Spotify now-playing experience:
- *   blurred artwork backdrop · scaled cover art · like + more ·
- *   scrub slider · control deck · Smart Shuffle & Autoplay toggles ·
- *   share · queue sheet (now playing + next up) · song radio · download.
+ * Player v3 — the inspiration-fueled now-playing experience:
+ *   artwork-blurred backdrop tinted by the song's extracted palette ·
+ *   rotating VINYL disc with the cover as the record label (inspo 3/5) ·
+ *   WAVEFORM scrubber — 44 song-shaped bars, played side glowing in the
+ *   track's accent (inspo 3) · glass chips for Smart Shuffle / Autoplay ·
+ *   queue sheet (now playing + next up) · song radio · share · download.
+ *
+ * Performance: exactly ONE BlurView (backdrop), one native-driver rotation
+ * loop, and 44 static-height bars whose colors change with progress.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Dimensions,
+  Easing,
   FlatList,
   Image,
   Modal,
@@ -24,7 +31,6 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import Slider from '@react-native-community/slider';
 import { useProgress } from 'react-native-track-player';
 import type { Track } from '../types';
 import { getRadio } from '../ai/engine';
@@ -36,7 +42,9 @@ import { TrackRow, EqualizerBars } from '../components/TrackRow';
 import { PressableScale } from '../components/PressableScale';
 import { TrackMenu } from '../components/TrackMenu';
 import { useToast } from '../components/Toast';
-import { colors, fonts, radius, spacing } from '../theme';
+import { withAlpha } from '../theme/dynamic';
+import { useDynamicPalette } from '../theme/DynamicThemeProvider';
+import { colors, fonts, spacing } from '../theme';
 import type { RootStackParamList } from './navigation';
 
 function fmt(sec: number): string {
@@ -46,10 +54,208 @@ function fmt(sec: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
+/* ── deterministic per-song waveform silhouette ─────────────────────── */
+
+function makeBars(seed: string, count: number): number[] {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    h ^= seed.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  const rand = () => {
+    h ^= h << 13;
+    h ^= h >>> 17;
+    h ^= h << 5;
+    h >>>= 0;
+    return h / 4294967295;
+  };
+  const p1 = rand() * Math.PI * 2;
+  const p2 = rand() * Math.PI * 2;
+  const f1 = 0.42 + rand() * 0.25;
+  const f2 = 0.16 + rand() * 0.12;
+  const bars: number[] = [];
+  for (let i = 0; i < count; i++) {
+    const t = i / (count - 1);
+    const wave =
+      0.52 * Math.abs(Math.sin(t * Math.PI * f1 * count + p1)) +
+      0.32 * Math.abs(Math.sin(t * Math.PI * f2 * count + p2)) +
+      0.16 * rand();
+    bars.push(Math.min(1, Math.max(0.22, 0.34 + wave * 0.66)));
+  }
+  return bars;
+}
+
+/* ── waveform scrubber (inspo 3) ─────────────────────────────────────── */
+
+function WaveformScrubber({
+  trackKey,
+  duration,
+  position,
+  scrubbing,
+  scrubValue,
+  glow,
+  onScrubStart,
+  onScrubMove,
+  onScrubEnd,
+}: {
+  trackKey: string;
+  duration: number;
+  position: number;
+  scrubbing: boolean;
+  scrubValue: number;
+  glow: string;
+  onScrubStart: () => void;
+  onScrubMove: (seconds: number) => void;
+  onScrubEnd: (seconds: number) => void;
+}) {
+  const BAR_COUNT = 44;
+  const HEIGHT = 40;
+  const bars = useMemo(() => makeBars(trackKey, BAR_COUNT), [trackKey]);
+  const widthRef = useRef(1);
+
+  const ratio =
+    duration > 0 ? Math.min(1, (scrubbing ? scrubValue : position) / duration) : 0;
+  const playedBars = Math.round(ratio * BAR_COUNT);
+
+  const ratioFromEvent = (x: number): number => {
+    const w = widthRef.current || 1;
+    return Math.min(1, Math.max(0, x / w));
+  };
+
+  return (
+    <View
+      style={styles.wave}
+      onLayout={(e) => {
+        widthRef.current = e.nativeEvent.layout.width;
+      }}
+      onStartShouldSetResponder={() => true}
+      onMoveShouldSetResponder={() => true}
+      onResponderGrant={(e) => {
+        onScrubStart();
+        onScrubMove(ratioFromEvent(e.nativeEvent.locationX) * duration);
+      }}
+      onResponderMove={(e) => {
+        onScrubMove(ratioFromEvent(e.nativeEvent.locationX) * duration);
+      }}
+      onResponderRelease={(e) => {
+        onScrubEnd(ratioFromEvent(e.nativeEvent.locationX) * duration);
+      }}
+      onResponderTerminate={() => onScrubEnd(scrubValue)}
+    >
+      {bars.map((h, i) => (
+        <View
+          key={i}
+          style={{
+            flex: 1,
+            height: Math.round(h * HEIGHT),
+            borderRadius: 2,
+            backgroundColor:
+              i < playedBars ? glow : i === playedBars ? withAlpha(glow, 0.55) : 'rgba(255,255,255,0.18)',
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+/* ── vinyl disc (inspo 3/5) ─────────────────────────────────────────── */
+
+function VinylDisc({
+  artwork,
+  seed,
+  size,
+  spinning,
+  glow,
+}: {
+  artwork?: string;
+  seed: string;
+  size: number;
+  spinning: boolean;
+  glow: string;
+}) {
+  const spin = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (spinning) {
+      const loop = Animated.loop(
+        Animated.timing(spin, {
+          toValue: 1,
+          duration: 24000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+      );
+      loop.start();
+      return () => loop.stop();
+    }
+    return undefined;
+  }, [spinning, spin]);
+
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  const labelSize = Math.round(size * 0.62);
+
+  return (
+    <Animated.View
+      style={[
+        styles.vinyl,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          transform: [{ rotate }],
+          shadowColor: glow,
+        },
+      ]}
+    >
+      {/* groove rings */}
+      <View
+        style={{
+          position: 'absolute',
+          top: size * 0.045,
+          left: size * 0.045,
+          right: size * 0.045,
+          bottom: size * 0.045,
+          borderRadius: size * 0.455,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: 'rgba(255,255,255,0.055)',
+        }}
+      />
+      <View
+        style={{
+          position: 'absolute',
+          top: size * 0.14,
+          left: size * 0.14,
+          right: size * 0.14,
+          bottom: size * 0.14,
+          borderRadius: size * 0.36,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: 'rgba(255,255,255,0.04)',
+        }}
+      />
+      {/* the record label = album art */}
+      <View
+        style={{
+          width: labelSize,
+          height: labelSize,
+          borderRadius: labelSize / 2,
+          overflow: 'hidden',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Artwork uri={artwork} seed={seed} size={labelSize} variant="circle" />
+        {/* spindle hole */}
+        <View style={styles.spindle} />
+      </View>
+    </Animated.View>
+  );
+}
+
 export function PlayerScreen() {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const toast = useToast();
+  const palette = useDynamicPalette();
   const {
     active,
     isPlaying,
@@ -85,23 +291,15 @@ export function PlayerScreen() {
   const [downloadState, setDownloadState] = useState<'idle' | 'downloading' | 'done' | 'error'>('idle');
   const [downloadPct, setDownloadPct] = useState(0);
   const [radioLoading, setRadioLoading] = useState(false);
-  const artScale = useRef(new Animated.Value(1)).current;
 
   const isFav = active ? favorites.has(active.id) : false;
   const trackKey = active?.id ?? 'none';
+  // vinyl breathes with the screen: 300 on standard phones, smaller on compact ones
+  const discSize = Math.min(320, Math.max(240, Dimensions.get('window').width - 100));
 
   useEffect(() => {
     void refreshQueue();
   }, [refreshQueue]);
-
-  useEffect(() => {
-    Animated.spring(artScale, {
-      toValue: isPlaying ? 1 : 0.88,
-      friction: 8,
-      tension: 60,
-      useNativeDriver: true,
-    }).start();
-  }, [isPlaying, artScale, trackKey]);
 
   useEffect(() => {
     setDownloadState('idle');
@@ -142,7 +340,10 @@ export function PlayerScreen() {
         await playQueue([active, ...radio], 0);
         toast.show({ message: `Radio started · ${radio.length + 1} songs`, icon: 'radio' });
       } else {
-        toast.show({ message: 'Not enough songs for a radio — try another track', icon: 'alert-circle-outline' });
+        toast.show({
+          message: 'Not enough songs for a radio — try another track',
+          icon: 'alert-circle-outline',
+        });
       }
     } finally {
       setRadioLoading(false);
@@ -167,16 +368,21 @@ export function PlayerScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Blurred artwork backdrop */}
+      {/* Blurred artwork backdrop, tinted by the song's palette */}
       {active?.artwork ? (
         <View style={StyleSheet.absoluteFill}>
           <Image source={{ uri: active.artwork }} style={styles.backdrop} resizeMode="cover" />
           <BlurView intensity={45} experimentalBlurMethod="dimezisBlurView" style={StyleSheet.absoluteFill} />
-          <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.55)' }]} />
+          <LinearGradient
+            colors={[withAlpha(palette.deep, 0.62), 'rgba(4,5,8,0.9)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+            style={StyleSheet.absoluteFill}
+          />
         </View>
       ) : (
         <LinearGradient
-          colors={['#1A1524', '#0E0E12', '#0A0A0B']}
+          colors={[palette.deep, '#050609']}
           style={StyleSheet.absoluteFill}
         />
       )}
@@ -205,13 +411,13 @@ export function PlayerScreen() {
         </View>
 
         <View style={styles.artWrap}>
-          <Animated.View style={{ transform: [{ scale: artScale }] }}>
-            {active ? (
-              <Artwork uri={active.artwork} seed={active.id} size={320} style={styles.art} />
-            ) : (
-              <Artwork seed="empty" size={320} style={styles.art} />
-            )}
-          </Animated.View>
+          <VinylDisc
+            artwork={active?.artwork}
+            seed={trackKey}
+            size={discSize}
+            spinning={isPlaying}
+            glow={palette.glow}
+          />
         </View>
 
         <View style={styles.titleSection}>
@@ -220,7 +426,7 @@ export function PlayerScreen() {
               <Text style={styles.title} numberOfLines={2}>
                 {trackName}
               </Text>
-              <Text style={styles.artist} numberOfLines={1}>
+              <Text style={[styles.artist, { color: palette.glow }]} numberOfLines={1}>
                 {artistName}
               </Text>
             </View>
@@ -228,31 +434,29 @@ export function PlayerScreen() {
               <Ionicons
                 name={isFav ? 'heart' : 'heart-outline'}
                 size={27}
-                color={isFav ? colors.accentBright : colors.textDim}
+                color={isFav ? palette.glow : colors.textDim}
               />
             </PressableScale>
           </View>
         </View>
 
         <View style={styles.progressSection}>
-          <Slider
-            style={styles.slider}
-            minimumValue={0}
-            maximumValue={Math.max(1, duration)}
-            value={Math.min(position_, Math.max(1, duration))}
-            minimumTrackTintColor={colors.text}
-            maximumTrackTintColor="rgba(255,255,255,0.3)"
-            thumbTintColor={colors.text}
-            onSlidingStart={(v) => {
+          <WaveformScrubber
+            trackKey={trackKey}
+            duration={Math.max(1, duration)}
+            position={position}
+            scrubbing={scrubbing}
+            scrubValue={scrubValue}
+            glow={palette.glow}
+            onScrubStart={() => {
               setScrubbing(true);
-              setScrubValue(v);
+              setScrubValue(position);
             }}
-            onValueChange={(v) => setScrubValue(v)}
-            onSlidingComplete={(v) => {
+            onScrubMove={(sec) => setScrubValue(sec)}
+            onScrubEnd={(sec) => {
               setScrubbing(false);
-              seek(v);
+              void seek(sec);
             }}
-            disabled={!active}
           />
           <View style={styles.timeRow}>
             <Text style={styles.time}>{fmt(position_)}</Text>
@@ -265,19 +469,28 @@ export function PlayerScreen() {
             <Ionicons
               name="shuffle"
               size={26}
-              color={shuffle ? colors.accentBright : colors.textDim}
+              color={shuffle ? palette.glow : colors.textDim}
             />
           </PressableScale>
           <PressableScale hitSlop={10} onPress={prev} disabled={!active}>
             <Ionicons name="play-skip-back" size={36} color={colors.text} />
           </PressableScale>
-          <PressableScale style={styles.playBtn} onPress={togglePlay} disabled={!active} haptic>
+          <PressableScale
+            style={[styles.playBtn, { shadowColor: palette.glow }]}
+            onPress={togglePlay}
+            disabled={!active}
+            haptic
+          >
             {loading ? (
               <View style={styles.spinnerWrap}>
-                <PulseDot />
+                <PulseDot glow={palette.glow} />
               </View>
             ) : (
-              <Ionicons name={isPlaying ? 'pause' : 'play'} size={40} color={colors.bg} />
+              <Ionicons
+                name={isPlaying ? 'pause' : 'play'}
+                size={40}
+                color={colors.bgDeep}
+              />
             )}
           </PressableScale>
           <PressableScale hitSlop={10} onPress={next} disabled={!active}>
@@ -286,16 +499,18 @@ export function PlayerScreen() {
           <PressableScale hitSlop={10} onPress={cycleRepeat}>
             <View>
               <Ionicons
-                name={repeatActive ? 'repeat' : 'repeat'}
+                name="repeat"
                 size={26}
-                color={repeatActive ? colors.accentBright : colors.textDim}
+                color={repeatActive ? palette.glow : colors.textDim}
               />
-              {repeat === 'track' ? <View style={styles.repeatOne} /> : null}
+              {repeat === 'track' ? (
+                <View style={[styles.repeatOne, { backgroundColor: palette.glow }]} />
+              ) : null}
             </View>
           </PressableScale>
         </View>
 
-        {/* Bottom action row */}
+        {/* Bottom action row — glass chips */}
         <View style={styles.bottomRow}>
           <PressableScale hitSlop={10} onPress={onShare} disabled={!active}>
             <Ionicons name="share-social-outline" size={22} color={colors.textDim} />
@@ -304,14 +519,20 @@ export function PlayerScreen() {
             hitSlop={10}
             haptic
             onPress={() => setSmartShuffle(!smartShuffle)}
-            style={styles.smartBtn}
+            style={[
+              styles.smartBtn,
+              smartShuffle && {
+                backgroundColor: withAlpha(palette.vibrant, 0.16),
+                borderColor: withAlpha(palette.glow, 0.38),
+              },
+            ]}
           >
             <Ionicons
               name="sparkles"
-              size={22}
-              color={smartShuffle ? colors.aiEnd : colors.textDim}
+              size={20}
+              color={smartShuffle ? palette.glow : colors.textDim}
             />
-            <Text style={[styles.smartText, smartShuffle && { color: colors.aiEnd }]}>
+            <Text style={[styles.smartText, smartShuffle && { color: palette.glow }]}>
               Smart Shuffle
             </Text>
           </PressableScale>
@@ -321,7 +542,18 @@ export function PlayerScreen() {
         </View>
 
         <View style={styles.autoRow}>
-          <PressableScale hitSlop={10} haptic onPress={() => setAutoplay(!autoplay)} style={styles.autoBtn}>
+          <PressableScale
+            hitSlop={10}
+            haptic
+            onPress={() => setAutoplay(!autoplay)}
+            style={[
+              styles.autoBtn,
+              autoplay && {
+                backgroundColor: withAlpha(colors.accent, 0.16),
+                borderColor: withAlpha(colors.accentBright, 0.35),
+              },
+            ]}
+          >
             <Ionicons
               name="radio-outline"
               size={16}
@@ -386,7 +618,7 @@ export function PlayerScreen() {
   );
 }
 
-function PulseDot() {
+function PulseDot({ glow }: { glow: string }) {
   const pulse = useRef(new Animated.Value(0.4)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -404,7 +636,7 @@ function PulseDot() {
         width: 22,
         height: 22,
         borderRadius: 11,
-        backgroundColor: colors.bg,
+        backgroundColor: glow,
         opacity: pulse,
       }}
     />
@@ -496,15 +728,33 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textTransform: 'uppercase',
   },
-  topSub: { color: colors.text, fontSize: 13, fontWeight: '600', fontFamily: fonts.semibold, maxWidth: 180 },
-  artWrap: { alignItems: 'center', paddingVertical: spacing.xl },
-  art: {
-    borderRadius: radius.md,
-    shadowColor: '#000',
-    shadowOpacity: 0.65,
-    shadowRadius: 26,
-    shadowOffset: { width: 0, height: 14 },
-    elevation: 18,
+  topSub: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: fonts.semibold,
+    maxWidth: 180,
+  },
+  artWrap: { alignItems: 'center', paddingVertical: spacing.xl + 4 },
+  vinyl: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0C0D11',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.07)',
+    shadowOpacity: 0.5,
+    shadowRadius: 34,
+    shadowOffset: { width: 0, height: 18 },
+    elevation: 20,
+  },
+  spindle: {
+    position: 'absolute',
+    width: 11,
+    height: 11,
+    borderRadius: 6,
+    backgroundColor: '#0A0B0E',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
   },
   titleSection: { gap: spacing.sm },
   titleActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg },
@@ -515,9 +765,14 @@ const styles = StyleSheet.create({
     fontFamily: fonts.extrabold,
     letterSpacing: -0.3,
   },
-  artist: { color: colors.textDim, fontSize: 16, fontFamily: fonts.medium, marginTop: 2 },
-  progressSection: { gap: 2 },
-  slider: { width: '100%', height: 38 },
+  artist: { fontSize: 16, fontFamily: fonts.medium, marginTop: 2 },
+  progressSection: { gap: 8 },
+  wave: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 3,
+    height: 40,
+  },
   timeRow: { flexDirection: 'row', justifyContent: 'space-between' },
   time: { color: 'rgba(255,255,255,0.55)', fontSize: 11, fontWeight: '600', fontFamily: fonts.semibold },
   repeatOne: {
@@ -527,7 +782,6 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: colors.accentBright,
     borderWidth: 1.5,
     borderColor: colors.bgDeep,
   },
@@ -545,6 +799,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowOpacity: 0.55,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 16,
   },
   spinnerWrap: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   bottomRow: {
@@ -554,10 +812,30 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     paddingHorizontal: spacing.md,
   },
-  smartBtn: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  smartBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
+    backgroundColor: colors.glass,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
   smartText: { color: colors.textDim, fontSize: 12, fontWeight: '700', fontFamily: fonts.bold },
   autoRow: { alignItems: 'center' },
-  autoBtn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  autoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
+    backgroundColor: colors.glass,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+  },
   autoText: { color: colors.textFaint, fontSize: 11, fontWeight: '700', fontFamily: fonts.bold },
   previewNote: {
     color: 'rgba(255,255,255,0.45)',

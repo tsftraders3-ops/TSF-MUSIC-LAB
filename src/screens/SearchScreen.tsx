@@ -20,6 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import type { Track } from '../types';
 import { searchMusic } from '../api/music';
 import { usePlayer } from '../player/PlayerProvider';
@@ -153,7 +154,7 @@ export function SearchScreen() {
           columnWrapperStyle={styles.genreRow}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          contentContainerStyle={{ paddingBottom: 170 }}
+          contentContainerStyle={{ paddingBottom: 195 }}
           ListHeaderComponent={
             <View>
               {recentSearches.length > 0 ? (
@@ -184,16 +185,25 @@ export function SearchScreen() {
               <PressableScale
                 onPress={() => nav.navigate('Tabs', { screen: 'AI' })}
                 haptic
-                style={styles.aiBanner}
+                style={styles.aiBannerWrap}
               >
-                <Ionicons name="sparkles" size={26} color="#fff" />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.aiBannerTitle}>Create a playlist with TSF AI</Text>
-                  <Text style={styles.aiBannerSub}>
-                    “Punjabi gym bangers”, “90s heartbreak Bollywood” — just describe it
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.8)" />
+                <LinearGradient
+                  colors={['#7C4DFF', '#B04DD6', '#C86DD7']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.aiBanner}
+                >
+                  <View style={styles.aiBannerIcon}>
+                    <Ionicons name="sparkles" size={24} color="#fff" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.aiBannerTitle}>Create a playlist with TSF AI</Text>
+                    <Text style={styles.aiBannerSub}>
+                      “Punjabi gym bangers”, “90s heartbreak Bollywood” — just describe it
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.8)" />
+                </LinearGradient>
               </PressableScale>
 
               <Text style={styles.browseTitle}>Browse all</Text>
@@ -235,7 +245,7 @@ export function SearchScreen() {
           )}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          contentContainerStyle={{ paddingBottom: 170 }}
+          contentContainerStyle={{ paddingBottom: 195 }}
           ListHeaderComponent={
             degraded ? (
               <Text style={styles.degradedNote}>
@@ -250,13 +260,15 @@ export function SearchScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
+  root: { flex: 1, backgroundColor: 'transparent' },
   searchWrap: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    backgroundColor: colors.card,
+    backgroundColor: colors.glassStrong,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
     borderRadius: radius.full,
     paddingHorizontal: spacing.lg,
     height: 48,
@@ -276,24 +288,39 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: colors.card,
+    backgroundColor: colors.glass,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
     borderRadius: radius.full,
     paddingHorizontal: spacing.lg,
     paddingVertical: 9,
   },
   chipText: { color: colors.textDim, fontSize: 13, fontFamily: fonts.medium },
+  aiBannerWrap: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.xl,
+    marginBottom: spacing.lg,
+    borderRadius: radius.squircle,
+    overflow: 'hidden',
+    shadowColor: '#7C4DFF',
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
   aiBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.lg,
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.xl,
-    marginBottom: spacing.lg,
     padding: spacing.lg + 2,
-    borderRadius: radius.xl,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: 'rgba(124,77,255,0.55)',
+  },
+  aiBannerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   aiBannerTitle: {
     color: colors.text,
@@ -321,7 +348,7 @@ const styles = StyleSheet.create({
   genreTile: {
     flex: 1,
     height: 100,
-    borderRadius: radius.sm + 2,
+    borderRadius: radius.md,
     padding: spacing.md - 2,
     overflow: 'hidden',
   },

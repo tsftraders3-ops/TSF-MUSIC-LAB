@@ -5,14 +5,20 @@
  */
 
 export const colors = {
-  // surfaces
-  bg: '#121212', // Spotify base canvas
-  bgDeep: '#0A0A0A', // behind modals / player backdrop
-  surface: '#181818',
-  card: '#242424', // elevated tile (Spotify "Connected" cards)
-  cardDim: '#1D1D1D',
-  elevated: '#2E2E2E',
-  border: '#2A2A2A',
+  // surfaces — deep charcoal (inspo 3/5) rather than flat black
+  bg: '#0A0B0E', // base canvas
+  bgDeep: '#050609', // behind modals / player backdrop
+  surface: '#121318',
+  card: '#1A1C22', // elevated tile
+  cardDim: '#15171C',
+  elevated: '#23252C',
+  border: '#26282F',
+
+  // glassmorphism tokens (inspo 1/2) — translucency + hairline edges
+  glass: 'rgba(255,255,255,0.065)',
+  glassStrong: 'rgba(255,255,255,0.10)',
+  glassBorder: 'rgba(255,255,255,0.09)',
+  glassBorderStrong: 'rgba(255,255,255,0.16)',
 
   // text
   text: '#FFFFFF',
@@ -71,11 +77,12 @@ export const spacing = {
 };
 
 export const radius = {
-  sm: 4,
-  md: 8,
-  lg: 12,
-  xl: 16,
-  xxl: 22,
+  sm: 6,
+  md: 10,
+  lg: 14,
+  xl: 18,
+  xxl: 24,
+  squircle: 20, // inspo 1/2/5 signature soft card
   full: 999,
 };
 

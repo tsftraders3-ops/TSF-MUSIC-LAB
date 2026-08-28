@@ -7,6 +7,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -19,6 +20,8 @@ import { Artwork } from '../components/Artwork';
 import { PressableScale } from '../components/PressableScale';
 import { TrackMenu } from '../components/TrackMenu';
 import { colors, fonts, radius, spacing } from '../theme';
+import { useTrackPalette } from '../theme/DynamicThemeProvider';
+import { withAlpha } from '../theme/dynamic';
 import type { RootStackParamList } from './navigation';
 
 export function CollectionScreen() {
@@ -74,9 +77,17 @@ export function CollectionScreen() {
   };
 
   const heroArt = tracks?.[0]?.artwork || collection.artwork;
+  // every collection wears its own artwork's colors (Spotify-style tint)
+  const palette = useTrackPalette(heroArt, collection.id);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
+      {/* tinted header wash — deep album color melting into the canvas */}
+      <LinearGradient
+        colors={[withAlpha(palette.deep, 0.95), withAlpha(palette.deep, 0.4), 'rgba(10,11,14,0)']}
+        style={styles.headerWash}
+        pointerEvents="none"
+      />
       <View style={styles.topBar}>
         <PressableScale hitSlop={12} onPress={() => nav.goBack()}>
           <Ionicons name="chevron-back" size={26} color={colors.text} />
@@ -101,9 +112,13 @@ export function CollectionScreen() {
             </Text>
             {tracks && tracks.length ? (
               <View style={styles.actions}>
-                <PressableScale haptic style={styles.playBtn} onPress={() => play(0)}>
-                  <Ionicons name="play" size={21} color={colors.accentDeep} />
-                  <Text style={styles.playBtnText}>Play</Text>
+                <PressableScale
+                  haptic
+                  style={[styles.playBtn, { backgroundColor: palette.glow, shadowColor: palette.glow }]}
+                  onPress={() => play(0)}
+                >
+                  <Ionicons name="play" size={21} color="#07080B" />
+                  <Text style={[styles.playBtnText, { color: '#07080B' }]}>Play</Text>
                 </PressableScale>
                 <PressableScale haptic style={styles.shuffleBtn} onPress={playShuffled}>
                   <Ionicons name="shuffle" size={19} color={colors.text} />
@@ -141,6 +156,10 @@ export function CollectionScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  headerWash: {
+    ...StyleSheet.absoluteFillObject,
+    bottom: '55%',
+  },
   topBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -179,17 +198,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    backgroundColor: colors.accentBright,
     borderRadius: radius.full,
     paddingHorizontal: spacing.xl,
     paddingVertical: 12,
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 10,
   },
-  playBtnText: { color: colors.accentDeep, fontSize: 15, fontWeight: '800', fontFamily: fonts.extrabold },
+  playBtnText: { fontSize: 15, fontWeight: '800', fontFamily: fonts.extrabold },
   shuffleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    backgroundColor: colors.card,
+    backgroundColor: colors.glass,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
     borderRadius: radius.full,
     paddingHorizontal: spacing.lg + 4,
     paddingVertical: 12,

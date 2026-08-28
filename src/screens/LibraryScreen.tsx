@@ -36,6 +36,8 @@ import { Artwork } from '../components/Artwork';
 import { PressableScale } from '../components/PressableScale';
 import { useToast } from '../components/Toast';
 import { colors, fonts, radius, spacing } from '../theme';
+import { useDynamicPalette } from '../theme/DynamicThemeProvider';
+import { withAlpha } from '../theme/dynamic';
 import type { RootStackParamList } from './navigation';
 
 type Tab = 'playlists' | 'favorites' | 'downloads' | 'recent';
@@ -45,6 +47,7 @@ export function LibraryScreen() {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { playQueue } = usePlayer();
   const toast = useToast();
+  const palette = useDynamicPalette();
 
   const [tab, setTab] = useState<Tab>('playlists');
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -141,17 +144,17 @@ export function LibraryScreen() {
         </View>
       </View>
 
-      {/* Your Sound — stats card */}
+      {/* Your Sound — stats card, wearing the current song's colors */}
       <PressableScale
         haptic
         onPress={() => nav.navigate('Stats')}
         style={styles.statsCard}
       >
         <LinearGradient
-          colors={[colors.aiStart, colors.aiMid, colors.aiEnd]}
+          colors={[withAlpha(palette.deep, 0.95), withAlpha(palette.vibrant, 0.45)]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={styles.statsGradient}
+          style={[styles.statsGradient, { borderWidth: StyleSheet.hairlineWidth, borderColor: withAlpha(palette.glow, 0.25) }]}
         >
           <View>
             <Text style={styles.statsTitle}>Your Sound</Text>
@@ -159,7 +162,9 @@ export function LibraryScreen() {
               {totalSongs} saved · {recents.length} recently played
             </Text>
           </View>
-          <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.85)" />
+          <View style={[styles.statsBadge, { backgroundColor: palette.glow }]}>
+            <Ionicons name="chevron-forward" size={18} color="#07080B" />
+          </View>
         </LinearGradient>
       </PressableScale>
 
@@ -187,7 +192,7 @@ export function LibraryScreen() {
         <FlatList
           data={playlists}
           keyExtractor={(p) => p.id}
-          contentContainerStyle={{ paddingBottom: 160, flexGrow: 1 }}
+          contentContainerStyle={{ paddingBottom: 185, flexGrow: 1 }}
           ListEmptyComponent={
             <View style={styles.empty}>
               <Ionicons name="add-circle-outline" size={48} color={colors.textFaint} />
@@ -373,7 +378,7 @@ function TrackTabList({
     <FlatList
       data={tracks}
       keyExtractor={(t) => t.id}
-      contentContainerStyle={{ paddingBottom: 160 }}
+      contentContainerStyle={{ paddingBottom: 185 }}
       renderItem={({ item, index }) => (
         <TrackRow track={item} onPress={() => onPlay(tracks, index)} />
       )}
@@ -382,7 +387,7 @@ function TrackTabList({
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
+  root: { flex: 1, backgroundColor: 'transparent' },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -402,16 +407,36 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: colors.card,
+    backgroundColor: colors.glassStrong,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  statsCard: { marginHorizontal: spacing.lg, marginBottom: spacing.md, borderRadius: radius.lg, overflow: 'hidden' },
+  statsCard: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    borderRadius: radius.squircle,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
   statsGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: spacing.lg + 2,
+    borderRadius: radius.squircle,
+  },
+  statsBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   statsTitle: { color: '#fff', fontSize: 18, fontWeight: '900', fontFamily: fonts.black },
   statsSub: { color: 'rgba(255,255,255,0.85)', fontSize: 12.5, fontFamily: fonts.medium, marginTop: 2 },
@@ -426,7 +451,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     paddingHorizontal: spacing.lg,
     paddingVertical: 8,
-    backgroundColor: colors.card,
+    backgroundColor: colors.glass,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
   },
   tabPillActive: { backgroundColor: colors.accent },
   tabText: { color: colors.textDim, fontSize: 13, fontWeight: '700', fontFamily: fonts.bold },
@@ -444,8 +471,10 @@ const styles = StyleSheet.create({
   createIcon: {
     width: 62,
     height: 62,
-    borderRadius: radius.sm + 2,
-    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    backgroundColor: colors.glassStrong,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -459,7 +488,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     minHeight: 78,
   },
-  playlistArtFallback: { borderRadius: radius.sm + 2, overflow: 'hidden' },
+  playlistArtFallback: { borderRadius: radius.md, overflow: 'hidden' },
   playlistGradient: {
     width: 62,
     height: 62,

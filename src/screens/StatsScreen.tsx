@@ -17,6 +17,8 @@ import { usePlayer } from '../player/PlayerProvider';
 import { Artwork } from '../components/Artwork';
 import { PressableScale } from '../components/PressableScale';
 import { colors, fonts, radius, spacing } from '../theme';
+import { useDynamicPalette } from '../theme/DynamicThemeProvider';
+import { withAlpha } from '../theme/dynamic';
 import type { RootStackParamList } from './navigation';
 
 function fmtMinutes(mins: number): string {
@@ -30,6 +32,7 @@ export function StatsScreen() {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { playQueue } = usePlayer();
+  const palette = useDynamicPalette();
   const [stats, setStats] = useState<ListeningStats | null>(null);
 
   useEffect(() => {
@@ -52,12 +55,12 @@ export function StatsScreen() {
         </View>
       ) : (
         <ScrollView contentContainerStyle={{ paddingBottom: 160 }} showsVerticalScrollIndicator={false}>
-          {/* Hero stats */}
+          {/* Hero stats — wearing the current song's palette */}
           <LinearGradient
-            colors={[colors.aiStart, colors.aiMid, colors.aiEnd]}
+            colors={[withAlpha(palette.deep, 0.95), withAlpha(palette.vibrant, 0.5)]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={styles.hero}
+            style={[styles.hero, { borderColor: withAlpha(palette.glow, 0.25) }]}
           >
             <Text style={styles.heroTitle}>Your listening</Text>
             <View style={styles.heroRow}>
@@ -156,9 +159,15 @@ const styles = StyleSheet.create({
   loadingText: { color: colors.textDim, fontSize: 14, fontFamily: fonts.medium },
   hero: {
     margin: spacing.lg,
-    borderRadius: radius.xl,
+    borderRadius: radius.squircle,
     padding: spacing.xl,
     gap: spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 10,
   },
   heroTitle: { color: '#fff', fontSize: 15, fontWeight: '800', fontFamily: fonts.extrabold, opacity: 0.9 },
   heroRow: { flexDirection: 'row', justifyContent: 'space-between' },

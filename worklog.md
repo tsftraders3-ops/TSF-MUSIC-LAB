@@ -36,3 +36,33 @@ Stage Summary:
 - Same signing identity as v2.0.x → installs as an in-place upgrade
 - All AI features run 100% on-device (standalone contract preserved — zero servers)
 - Reminder: user will rotate GitHub token after this session
+
+---
+Task ID: 4
+Agent: Super Z (main agent)
+Task: v2.2 — inspiration-driven UI overhaul: dynamic per-song theming engine + glassmorphism + vinyl player + waveform scrubber (user brief: clone the 5 storage.to inspiration images, "UI changes as per song", keep it light, run gauntlet loop end-to-end)
+
+Work Log:
+- Fetched https://storage.to/c/gqYQfnKDh, extracted signed CDN URLs from the 5 file pages, downloaded all 5 inspiration images (WebP→PNG), ran VLM deep analysis on each:
+  1) glass smart-dashboard (frosted cards, warm ambient), 2) 3D album carousel + glass pill player bar, 3) dark charcoal player w/ vinyl cutout + waveform scrubber + coral accent, 4) arch-masked hero + circular progress, 5) hero gradient card + vinyl record + floating white nav pill
+- Design DNA synthesis: glassmorphism (rgba(255,255,255,.06-0.1) + hairline borders), deep charcoal #0A0B0E (not pure black), 14-24px squircle radii, floating capsule bars, vinyl motif, waveform, DYNAMIC COLOR FROM ARTWORK (the "UI changes per song" ask)
+- NEW src/theme/dynamic.ts — palette engine: fetch 50x50 artwork variant (~2KB) → jpeg-js pure-JS decode (zero native risk) → 4096-bucket quantizer (border/vignette luminance filters, saturation-weighted dominant+vibrant scoring) → HSL art-direction (hue from art, sat/lightness floors so dark covers still glow; grayscale art → steel-blue accent) → {dominant, vibrant, deep, glow}; LRU 64 + in-flight dedupe; deterministic curated fallbacks; never rejects
+- NEW src/theme/DynamicThemeProvider.tsx — palette context driven by active track; AmbientBackdrop = cross-fading tinted gradient wash (2 stacked layers, 700ms native-driver fade, pointer-events none); useTrackPalette hook for per-card tinting
+- Smoke-tested the engine live: Arijit tracks → red #f9302e / teal #60c7ba / pink #c96482 / gold #dfb649 glows — every song visibly re-themes the app (scripts/test_palette.ts)
+- theme.ts v2: glass tokens (glass/glassStrong/glassBorder/glassBorderStrong), charcoal surface ladder, radius scale bumped (squircle 20)
+- App.tsx: DynamicThemeProvider above navigation; AmbientBackdrop behind Tab.Navigator (sceneContainerStyle transparent); FLOATING GLASS PILL TAB BAR (position absolute, 62px capsule, inset margins, safe-area disabled via safeAreaInsets:{bottom:0} + paddingBottom:0 — verified against installed BottomTabBar source)
+- MiniPlayer v3: floating glass capsule (radius 999, hairline border, glow progress line, palette-tinted heart + loading dot, play chip)
+- PlayerScreen v3 (the showpiece): palette-tinted blurred backdrop (deep→black gradient over BlurView), ROTATING VINYL disc (groove rings, artwork as label, spindle hole, glow shadow, 24s native loop, pause-aware, responsive size 240-320), WAVEFORM SCRUBBER (44 deterministic per-song bars via xorshift hash, played side in glow color, full touch-drag seek), glass Smart Shuffle + Autoplay chips, all accents re-colored by palette
+- HomeScreen v3: transparent root over ambient, glass quick tiles (14px radius), NEW HeroMixCard (Daily Mix lead card tinted by ITS OWN artwork palette + glow play FAB), squircle artist/AI cards, padding for floating bars
+- SearchScreen v3: glass search pill + chips, violet→fuchsia gradient AI banner (glow shadow), squircle genre tiles
+- LibraryScreen v3: glass filter pills + icon buttons, "Your Sound" card gradient from CURRENT song's palette
+- CollectionScreen/PlaylistScreen: Spotify-style tinted header wash (each collection wears its own cover palette), glow Play FAB, glass shuffle
+- StatsScreen: hero gradient from current palette; TrackMenu: glass sheet; ShelfSkeleton: glass blocks; Artwork: squircle-er radii
+- Performance guardrails: exactly ONE BlurView (player backdrop only); ambient = static gradients + single opacity fade; vinyl = one native loop; waveform = 44 static-height views; extraction once per track change off render path
+- bun add jpeg-js@0.4.4 (pure JS, ships own types); scripts/ added to .gitignore (tracked files unaffected)
+- Gauntlet gates: tsc --noEmit CLEAN ×3; expo export android Metro bundle CLEAN (2.91 MB hbc, +60KB for engine); palette pipeline verified against live JioSaavn artwork; bun.lock updated for frozen-lockfile CI
+
+Stage Summary:
+- v2.2.0 = the app now REPAINTS ITSELF with every song: ambient washes, player, mini player, chips, hero cards all wear the artwork's extracted colors
+- Zero native-module additions (jpeg-js is pure JS) → CI build risk unchanged vs v2.1
+- All playback/AI/safety/download logic untouched — pure UI-layer transformation

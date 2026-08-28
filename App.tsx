@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Font from 'expo-font';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -18,6 +18,7 @@ import { CollectionScreen } from './src/screens/CollectionScreen';
 import { PlaylistScreen } from './src/screens/PlaylistScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
 import { PlayerScreen } from './src/screens/PlayerScreen';
+import { AmbientBackdrop, DynamicThemeProvider } from './src/theme/DynamicThemeProvider';
 import type { RootStackParamList, TabParamList } from './src/screens/navigation';
 import { colors } from './src/theme';
 
@@ -39,15 +40,45 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<TabParamList>();
 
 function TabsScreen() {
+  const insets = useSafeAreaInsets();
+  const tabBarStyle = React.useMemo(
+    () => ({
+      position: 'absolute' as const,
+      backgroundColor: 'rgba(12,13,16,0.94)',
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: colors.glassBorder,
+      height: 62,
+      paddingTop: 8,
+      marginHorizontal: 14,
+      marginBottom: 10 + insets.bottom,
+      borderRadius: 31,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.glassBorder,
+      paddingBottom: 0,
+      shadowColor: '#000',
+      shadowOpacity: 0.45,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 18,
+    }),
+    [insets.bottom],
+  );
   return (
     <View style={styles.tabsWrap}>
+      {/* ambient canvas — paints the tab area with the current song */}
+      <AmbientBackdrop />
       <Tab.Navigator
         screenOptions={({ route }) => ({
           headerShown: false,
+          // transparent scenes so the ambient palette canvas shows through
+          sceneContainerStyle: { backgroundColor: 'transparent' },
           tabBarActiveTintColor: colors.text,
-          tabBarInactiveTintColor: colors.textFaint,
-          tabBarStyle: styles.tabBar,
+          tabBarInactiveTintColor: '#8B8D98',
+          tabBarStyle,
           tabBarLabelStyle: styles.tabLabel,
+          // we position the pill ourselves — disable the navigator's own
+          // bottom inset padding so the capsule stays a true 62px pill
+          safeAreaInsets: { bottom: 0, top: 0, left: 0, right: 0 },
           tabBarIcon: ({ color, focused }) => {
             const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
               Home: focused ? 'home' : 'home-outline',
@@ -55,7 +86,7 @@ function TabsScreen() {
               AI: focused ? 'sparkles' : 'sparkles-outline',
               Library: focused ? 'library' : 'library-outline',
             };
-            return <Ionicons name={icons[route.name] ?? 'home'} size={22} color={color} />;
+            return <Ionicons name={icons[route.name] ?? 'home'} size={21} color={color} />;
           },
         })}
       >
@@ -64,7 +95,10 @@ function TabsScreen() {
         <Tab.Screen name="AI" component={AIScreen} options={{ tabBarLabel: 'TSF AI' }} />
         <Tab.Screen name="Library" component={LibraryScreen} options={{ tabBarLabel: 'Your Library' }} />
       </Tab.Navigator>
-      <View style={styles.miniWrap} pointerEvents="box-none">
+      <View
+        style={[styles.miniWrap, { bottom: 82 + insets.bottom }]}
+        pointerEvents="box-none"
+      >
         <MiniPlayer />
       </View>
     </View>
@@ -93,37 +127,39 @@ export default function App() {
     <SafeAreaProvider>
       <ToastProvider>
         <PlayerProvider>
-          <NavigationContainer theme={navTheme}>
-            <StatusBar style="light" backgroundColor={colors.bg} />
-            <Stack.Navigator
-              screenOptions={{
-                headerShown: false,
-                contentStyle: { backgroundColor: colors.bg },
-              }}
-            >
-              <Stack.Screen name="Tabs" component={TabsScreen} />
-              <Stack.Screen
-                name="Collection"
-                component={CollectionScreen}
-                options={{ animation: 'slide_from_right' }}
-              />
-              <Stack.Screen
-                name="Playlist"
-                component={PlaylistScreen}
-                options={{ animation: 'slide_from_right' }}
-              />
-              <Stack.Screen
-                name="Stats"
-                component={StatsScreen}
-                options={{ animation: 'slide_from_right' }}
-              />
-              <Stack.Screen
-                name="Player"
-                component={PlayerScreen}
-                options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
-              />
-            </Stack.Navigator>
-          </NavigationContainer>
+          <DynamicThemeProvider>
+            <NavigationContainer theme={navTheme}>
+              <StatusBar style="light" backgroundColor={colors.bg} />
+              <Stack.Navigator
+                screenOptions={{
+                  headerShown: false,
+                  contentStyle: { backgroundColor: colors.bg },
+                }}
+              >
+                <Stack.Screen name="Tabs" component={TabsScreen} />
+                <Stack.Screen
+                  name="Collection"
+                  component={CollectionScreen}
+                  options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                  name="Playlist"
+                  component={PlaylistScreen}
+                  options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                  name="Stats"
+                  component={StatsScreen}
+                  options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                  name="Player"
+                  component={PlayerScreen}
+                  options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+                />
+              </Stack.Navigator>
+            </NavigationContainer>
+          </DynamicThemeProvider>
         </PlayerProvider>
       </ToastProvider>
     </SafeAreaProvider>
@@ -132,19 +168,11 @@ export default function App() {
 
 const styles = StyleSheet.create({
   tabsWrap: { flex: 1, backgroundColor: colors.bg },
-  tabBar: {
-    backgroundColor: '#0C0C0E',
-    borderTopColor: '#1F1F22',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    height: 60,
-    paddingTop: 7,
-  },
   tabLabel: { fontSize: 10, fontWeight: '700' },
   miniWrap: {
     position: 'absolute',
-    left: 8,
-    right: 8,
-    bottom: 66,
+    left: 10,
+    right: 10,
     zIndex: 20,
     elevation: 12,
   },

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
-import { colors, radius } from '../theme';
+import { colors } from '../theme';
 
 /** Shimmering placeholder blocks for home shelves while charts load. */
 export function ShelfSkeleton() {
@@ -36,7 +36,7 @@ const styles = StyleSheet.create({
   block: {
     width: 140,
     height: 140,
-    borderRadius: radius.md,
-    backgroundColor: colors.card,
+    borderRadius: 15,
+    backgroundColor: colors.glass,
   },
 });

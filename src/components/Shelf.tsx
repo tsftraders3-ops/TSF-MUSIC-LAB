@@ -85,7 +85,7 @@ export function Shelf({
   );
 }
 
-/** Home shortcut tile — Spotify's compact art+label chip grid. */
+/** Home shortcut tile — glass pill chip (inspo 1) with art + label. */
 export function QuickTile({
   title,
   artwork,
@@ -114,7 +114,7 @@ export function QuickTile({
           <Ionicons name={icon} size={22} color="#fff" />
         </LinearGradient>
       ) : (
-        <Artwork uri={artwork} seed={seed} size={56} variant="rounded" style={styles.quickArt} />
+        <Artwork uri={artwork} seed={seed} size={54} variant="rounded" style={styles.quickArt} />
       )}
       <Text style={styles.quickTitle} numberOfLines={2}>
         {title}
@@ -162,17 +162,19 @@ const styles = StyleSheet.create({
   quickTile: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: 5,
+    backgroundColor: colors.glass,
+    borderRadius: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
     overflow: 'hidden',
     height: 62,
   },
-  quickArt: { borderRadius: 0, marginLeft: 6 },
+  quickArt: { borderRadius: 10, marginLeft: 6 },
   quickIconWrap: {
-    width: 56,
-    height: '100%',
+    width: 54,
+    height: 54,
     marginLeft: 6,
-    borderRadius: 4,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },

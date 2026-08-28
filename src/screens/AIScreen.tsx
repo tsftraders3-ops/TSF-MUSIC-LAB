@@ -182,7 +182,7 @@ export function AIScreen() {
           data={result.tracks}
           keyExtractor={(t) => t.id}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingBottom: 170 }}
+          contentContainerStyle={{ paddingBottom: 195 }}
           ListHeaderComponent={
             <View style={styles.resultHeader}>
               <View style={styles.resultMeta}>
@@ -236,7 +236,7 @@ export function AIScreen() {
 
       {!result && !busy && phase !== 'error' ? (
         <ScrollView
-          contentContainerStyle={{ paddingBottom: 170 }}
+          contentContainerStyle={{ paddingBottom: 195 }}
           keyboardShouldPersistTaps="handled"
         >
           <Text style={styles.ideasTitle}>Try one of these</Text>
@@ -272,7 +272,7 @@ export function AIScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
+  root: { flex: 1, backgroundColor: 'transparent' },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg + 2, paddingBottom: spacing.md },
   title: {
     color: colors.text,
@@ -283,13 +283,13 @@ const styles = StyleSheet.create({
   },
   subtitle: { color: colors.textDim, fontSize: 14, fontFamily: fonts.medium, marginTop: 2 },
   inputWrap: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
-  inputGlow: { borderRadius: radius.xl, padding: 1.5 },
+  inputGlow: { borderRadius: radius.squircle, padding: 1.5 },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,
-    backgroundColor: '#161620',
-    borderRadius: radius.xl - 1,
+    backgroundColor: 'rgba(10,11,15,0.92)',
+    borderRadius: radius.squircle - 1,
     paddingLeft: spacing.lg,
     paddingRight: 5,
     height: 52,
@@ -322,7 +322,9 @@ const styles = StyleSheet.create({
   errorWrap: { alignItems: 'center', gap: spacing.md, paddingTop: spacing.xxl, padding: spacing.xl },
   errorText: { color: colors.textDim, fontSize: 14, fontFamily: fonts.medium },
   retryBtn: {
-    backgroundColor: colors.card,
+    backgroundColor: colors.glassStrong,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
     borderRadius: radius.full,
     paddingHorizontal: spacing.xl,
     paddingVertical: 10,
@@ -365,7 +367,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    backgroundColor: colors.card,
+    backgroundColor: colors.glass,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
     borderRadius: radius.full,
     paddingHorizontal: spacing.lg + 4,
     paddingVertical: 11,
@@ -375,7 +379,9 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: colors.card,
+    backgroundColor: colors.glass,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -406,20 +412,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    backgroundColor: colors.card,
+    backgroundColor: colors.glass,
     borderRadius: radius.full,
     paddingHorizontal: spacing.lg,
     paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(124,77,255,0.3)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(124,77,255,0.35)',
   },
   ideaText: { color: colors.text, fontSize: 13, fontFamily: fonts.medium },
   capability: {
     flexDirection: 'row',
     gap: spacing.md,
     alignItems: 'flex-start',
-    backgroundColor: colors.cardDim,
-    borderRadius: radius.lg,
+    backgroundColor: colors.glass,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
+    borderRadius: radius.squircle,
     margin: spacing.lg,
     marginTop: spacing.xl,
     padding: spacing.lg,

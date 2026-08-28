@@ -1,7 +1,8 @@
 /**
- * MiniPlayer v2 — Spotify's floating now-playing card: elevated dark
- * pill above the tab bar, artwork + meta + heart + play/next, with a
- * thin accent progress line running along its bottom edge.
+ * MiniPlayer v3 — floating glass capsule (inspo 2/5): a pill of frosted
+ * dark glass tinted by the current song's palette, artwork + meta + heart
+ * + play/next, with the accent progress line running along its bottom
+ * edge in the track's own glow color.
  */
 
 import React from 'react';
@@ -10,7 +11,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useProgress } from 'react-native-track-player';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { colors, fonts, radius, spacing } from '../theme';
+import { colors, fonts, spacing } from '../theme';
+import { useDynamicPalette } from '../theme/DynamicThemeProvider';
 import { Artwork } from './Artwork';
 import { usePlayer } from '../player/PlayerProvider';
 import { PressableScale } from './PressableScale';
@@ -19,6 +21,7 @@ import type { RootStackParamList } from '../screens/navigation';
 export function MiniPlayer() {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { active, isPlaying, loading, togglePlay, next, favorites, toggleLike } = usePlayer();
+  const palette = useDynamicPalette();
   const { position, duration } = useProgress(500);
   if (!active) return null;
   const pct = duration > 0 ? Math.min(1, position / duration) : 0;
@@ -45,19 +48,23 @@ export function MiniPlayer() {
           <Ionicons
             name={isFav ? 'heart' : 'heart-outline'}
             size={22}
-            color={isFav ? colors.accentBright : colors.textDim}
+            color={isFav ? palette.glow : colors.textDim}
           />
         </PressableScale>
 
-        <PressableScale hitSlop={10} onPress={togglePlay} style={styles.btn}>
+        <PressableScale
+          hitSlop={10}
+          onPress={togglePlay}
+          style={[styles.btn, styles.playChip]}
+        >
           {loading ? (
             <View style={styles.spinnerWrap}>
-              <View style={styles.dot} />
+              <View style={[styles.dot, { backgroundColor: palette.glow }]} />
             </View>
           ) : (
             <Ionicons
               name={isPlaying ? 'pause' : 'play'}
-              size={26}
+              size={25}
               color={colors.text}
             />
           )}
@@ -68,7 +75,9 @@ export function MiniPlayer() {
         </PressableScale>
       </PressableScale>
       <View style={styles.progressTrack}>
-        <View style={[styles.progressFill, { width: `${pct * 100}%` }]} />
+        <View
+          style={[styles.progressFill, { width: `${pct * 100}%`, backgroundColor: palette.glow }]}
+        />
       </View>
     </View>
   );
@@ -76,23 +85,26 @@ export function MiniPlayer() {
 
 const styles = StyleSheet.create({
   wrap: {
-    backgroundColor: '#2A2A2A',
-    borderRadius: radius.lg,
+    backgroundColor: 'rgba(16,17,21,0.88)',
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassBorder,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOpacity: 0.5,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
     elevation: 14,
   },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.sm + 2,
+    paddingLeft: 6,
+    paddingRight: spacing.sm,
     paddingVertical: 8,
-    gap: 6,
+    gap: 4,
   },
-  art: { borderRadius: 6 },
+  art: { borderRadius: 13 },
   meta: { flex: 1, gap: 1, paddingHorizontal: 2 },
   title: {
     color: colors.text,
@@ -102,9 +114,14 @@ const styles = StyleSheet.create({
   },
   artist: { color: colors.textDim, fontSize: 11, fontFamily: fonts.regular },
   btn: { padding: 7 },
+  playChip: {
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 999,
+    marginHorizontal: 2,
+  },
   spinnerWrap: {
-    width: 26,
-    height: 26,
+    width: 25,
+    height: 25,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -112,13 +129,12 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: colors.accentBright,
     opacity: 0.9,
   },
   progressTrack: {
     height: 2,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
     width: '100%',
   },
-  progressFill: { height: 2, backgroundColor: colors.text },
+  progressFill: { height: 2 },
 });

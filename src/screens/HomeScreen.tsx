@@ -35,9 +35,12 @@ import { getBecauseYouListened, getDailyMixes } from '../ai/engine';
 import { getChartsCache, getFavorites, getRecents, setChartsCache } from '../storage/store';
 import { usePlayer } from '../player/PlayerProvider';
 import { QuickTile, Shelf, ShelfCard } from '../components/Shelf';
+import { Artwork } from '../components/Artwork';
 import { ShelfSkeleton } from '../components/ShelfSkeleton';
 import { PressableScale } from '../components/PressableScale';
 import { colors, fonts, radius, spacing } from '../theme';
+import { useTrackPalette } from '../theme/DynamicThemeProvider';
+import { withAlpha } from '../theme/dynamic';
 import type { RootStackParamList } from './navigation';
 
 interface ChartShelf {
@@ -132,11 +135,12 @@ export function HomeScreen() {
 
   const hasMixes = !!mixes && mixes.length > 0;
   const loading = mixes === null && trending === null;
+  const heroMix = hasMixes ? mixes![0] : null;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 170 }}
+        contentContainerStyle={{ paddingBottom: 195 }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -202,6 +206,9 @@ export function HomeScreen() {
             ) : null}
           </View>
         )}
+
+        {/* ── Hero — your first Daily Mix, tinted by its own artwork ─── */}
+        {heroMix ? <HeroMixCard mix={heroMix} onPress={() => openTrackCollection(heroMix.title, heroMix.tracks)} /> : null}
 
         {loading ? (
           <ShelfSkeleton />
@@ -364,6 +371,44 @@ function AICreateCard({ onPress }: { onPress: () => void }) {
   );
 }
 
+/**
+ * HeroMixCard — the big lead card (inspo 5): a squircle tinted by the
+ * mix's OWN artwork palette with a floating play FAB. Each day's mix
+ * paints the hero differently.
+ */
+function HeroMixCard({ mix, onPress }: { mix: DailyMix; onPress: () => void }) {
+  const palette = useTrackPalette(mix.artwork, mix.id);
+  return (
+    <PressableScale onPress={onPress} haptic style={styles.heroWrap}>
+      <LinearGradient
+        colors={[withAlpha(palette.deep, 0.92), withAlpha(palette.vibrant, 0.34)]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={[styles.heroCard, { borderColor: withAlpha(palette.glow, 0.22) }]}
+      >
+        <Artwork uri={mix.artwork} seed={mix.id} size={78} variant="rounded" style={styles.heroArt} />
+        <View style={styles.heroMeta}>
+          <Text style={styles.heroKicker}>Made for you</Text>
+          <Text style={styles.heroTitle} numberOfLines={1}>
+            {mix.title}
+          </Text>
+          <Text style={styles.heroSub} numberOfLines={1}>
+            {mix.subtitle}
+          </Text>
+        </View>
+        <View
+          style={[
+            styles.heroPlay,
+            { backgroundColor: palette.glow, shadowColor: palette.glow },
+          ]}
+        >
+          <Ionicons name="play" size={24} color="#07080B" />
+        </View>
+      </LinearGradient>
+    </PressableScale>
+  );
+}
+
 function EmptyHome({ onGoAI }: { onGoAI: () => void }) {
   return (
     <View style={styles.empty}>
@@ -382,7 +427,8 @@ function EmptyHome({ onGoAI }: { onGoAI: () => void }) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.bg },
+  // transparent so the ambient backdrop (current song's palette) shows
+  root: { flex: 1, backgroundColor: 'transparent' },
   header: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg + 2,
@@ -415,7 +461,60 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.xl,
   },
-  artistCard: { width: 150, height: 150, borderRadius: radius.md, overflow: 'hidden' },
+  heroWrap: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.xl,
+    borderRadius: radius.squircle,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
+  },
+  heroCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md + 2,
+    padding: spacing.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.squircle,
+  },
+  heroArt: { borderRadius: 14 },
+  heroMeta: { flex: 1, gap: 2 },
+  heroKicker: {
+    color: 'rgba(255,255,255,0.55)',
+    fontSize: 10,
+    fontWeight: '800',
+    fontFamily: fonts.extrabold,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  heroTitle: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+    fontFamily: fonts.extrabold,
+    letterSpacing: -0.3,
+  },
+  heroSub: {
+    color: colors.textDim,
+    fontSize: 12.5,
+    fontFamily: fonts.medium,
+    marginTop: 2,
+  },
+  heroPlay: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOpacity: 0.6,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 10,
+  },
+  artistCard: { width: 150, height: 150, borderRadius: radius.squircle, overflow: 'hidden' },
   artistGradient: {
     width: '100%',
     height: '100%',
@@ -438,7 +537,7 @@ const styles = StyleSheet.create({
   aiCard: {
     width: 150,
     height: 150,
-    borderRadius: radius.md,
+    borderRadius: radius.squircle,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
