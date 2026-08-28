@@ -119,12 +119,14 @@ interface PlayerState {
   isPlaying: boolean;
   loading: boolean;
   queue: Track[];
+  /** id of the collection/playlist the current queue was started from */
+  contextId: string | null;
   shuffle: boolean;
   smartShuffle: boolean;
   autoplay: boolean;
   repeat: 'off' | 'queue' | 'track';
   favorites: Set<string>;
-  playQueue: (tracks: Track[], startIndex?: number) => Promise<void>;
+  playQueue: (tracks: Track[], startIndex?: number, contextId?: string) => Promise<void>;
   togglePlay: () => Promise<void>;
   next: () => Promise<void>;
   prev: () => Promise<void>;
@@ -150,6 +152,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [autoplay, setAutoplayState] = useState(true);
   const [repeat, setRepeat] = useState<'off' | 'queue' | 'track'>('off');
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [contextId, setContextId] = useState<string | null>(null);
   const originalQueue = useRef<Track[]>([]);
   const recentPushed = useRef<string>('');
   const booted = useRef(false);
@@ -246,10 +249,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return playable;
   }
 
-  async function playQueue(tracks: Track[], startIndex = 0): Promise<void> {
+  async function playQueue(
+    tracks: Track[],
+    startIndex = 0,
+    ctxId?: string,
+  ): Promise<void> {
     try {
       await ensureSetup();
       await askNotificationPermission();
+      setContextId(ctxId ?? null);
       const wantedId = tracks[startIndex]?.id;
       const playable = await buildPlayable(tracks);
       if (!playable.length || !wantedId) return;
@@ -477,6 +485,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       isPlaying,
       loading,
       queue,
+      contextId,
       shuffle,
       smartShuffle,
       autoplay,

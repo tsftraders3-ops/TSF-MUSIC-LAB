@@ -49,6 +49,16 @@ export const colors = {
   inactiveTab: '#A7A7A7', // Spotify inactive tab label/icon
   likedStart: '#450AF5', // Spotify Liked Songs gradient
   likedEnd: '#C4EFA1',
+
+  // chips / filter pills — repo-faithful (spotify-react-web-client):
+  // active = solid white with near-black text, inactive = 10% white
+  chipActiveBg: '#FFFFFF',
+  chipActiveText: '#2A2929',
+  chipInactiveBg: 'rgba(255,255,255,0.10)',
+
+  // play FAB — repo CirclePlay.scss: #1ED760, black icon, soft shadow
+  fabGreen: '#1ED760',
+  fabShadow: '0 8px 8px rgba(0,0,0,0.3)',
 };
 
 /** Figtree weights loaded via expo-font in App.tsx. */

@@ -10,7 +10,7 @@
  * explicit ever lands on this screen uninvited.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Dimensions,
   RefreshControl,
@@ -19,6 +19,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -37,6 +38,7 @@ import { QuickTile, Shelf, ShelfCard } from '../components/Shelf';
 import { ShelfSkeleton } from '../components/ShelfSkeleton';
 import { PressableScale } from '../components/PressableScale';
 import { colors, fonts, radius, spacing } from '../theme';
+import { useTrackPalette } from '../theme/DynamicThemeProvider';
 import type { RootStackParamList } from './navigation';
 
 type Chip = 'all' | 'music' | 'ai';
@@ -44,7 +46,7 @@ type Chip = 'all' | 'music' | 'ai';
 export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { playQueue } = usePlayer();
+  const { playQueue, contextId, isPlaying } = usePlayer();
   const [chip, setChip] = useState<Chip>('all');
 
   const [mixes, setMixes] = useState<DailyMix[] | null>(null);
@@ -57,9 +59,9 @@ export function HomeScreen() {
   const [offline, setOffline] = useState(false);
 
   const play = useCallback(
-    (tracks: Track[], index: number) => {
+    (tracks: Track[], index: number, ctxId?: string) => {
       if (tracks.length) {
-        playQueue(tracks, index);
+        playQueue(tracks, index, ctxId);
         nav.navigate('Player');
       }
     },
@@ -67,9 +69,9 @@ export function HomeScreen() {
   );
 
   const openTrackCollection = useCallback(
-    (title: string, tracks: Track[]) => {
+    (title: string, tracks: Track[], ctxId?: string) => {
       nav.navigate('Collection', {
-        collection: { id: `local-${title}`, title, artwork: tracks[0]?.artwork ?? '' },
+        collection: { id: ctxId ?? `local-${title}`, title, artwork: tracks[0]?.artwork ?? '' },
         tracks,
       });
     },
@@ -127,8 +129,36 @@ export function HomeScreen() {
   const loading = mixes === null && trending === null;
   const showAI = chip !== 'music'; // AI surfaces under All + AI chips
 
+  // ── The signature Spotify gradient wash ─────────────────────────────
+  // Repo: linear-gradient(180deg, pageColor 2%, #121212 11%) — the page
+  // wears the color of its content. Source: first Daily Mix / trending /
+  // recent artwork (falls back to the warm repo default rgb(66,32,35)).
+  const washArtwork = useMemo(
+    () => mixes?.[0]?.artwork || trending?.[0]?.artwork || recents[0]?.artwork,
+    [mixes, trending, recents],
+  );
+  const washSeed = useMemo(
+    () => mixes?.[0]?.id || trending?.[0]?.id || recents[0]?.id || 'home',
+    [mixes, trending, recents],
+  );
+  const washPalette = useTrackPalette(washArtwork, washSeed);
+  const washColor = washArtwork ? washPalette.wash : '#422023'; // repo default
+  // reference geometry: black header, then a sharp color onset below it
+  // fading across ~35% of the viewport
+  const headerH = insets.top + 58;
+  const washH = Math.round(globalHeight * 0.38);
+
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
+      {/* artwork-derived gradient wash — the Spotify signature.
+          Black behind the header, full-strength color onset below it,
+          then a long fade into #121212 (pixel-measured off the repo). */}
+      <LinearGradient
+        colors={[washColor, washColor, colors.bg]}
+        locations={[0, 0.16, 1]}
+        style={[styles.wash, { top: headerH, height: washH }]}
+        pointerEvents="none"
+      />
       <ScrollView
         contentContainerStyle={{ paddingBottom: 170 }}
         showsVerticalScrollIndicator={false}
@@ -178,13 +208,12 @@ export function HomeScreen() {
           </View>
         ) : null}
 
-        {/* ── Quick shortcuts — Spotify #2A2A2A tiles ─────────────────── */}
+        {/* ── Quick shortcuts — translucent tiles on the gradient wash ── */}
         {(favorites.length > 0 || recents.length > 0 || hasMixes) && (
           <View style={styles.quickGrid}>
             {favorites.length > 0 ? (
               <QuickTile
                 title="Liked Songs"
-                subtitle={`Playlist · ${favorites.length} songs`}
                 seed="liked-songs"
                 width={quickTileWidth()}
                 onPress={() => openTrackCollection('Liked Songs', favorites)}
@@ -193,17 +222,16 @@ export function HomeScreen() {
             ) : null}
             {hasMixes ? (
               <QuickTile
-                title="Daily Mix 1"
+                title={mixes![0].title}
                 artwork={mixes![0].artwork}
                 seed={mixes![0].id}
                 width={quickTileWidth()}
-                onPress={() => openTrackCollection('Daily Mix 1', mixes![0].tracks)}
+                onPress={() => openTrackCollection(mixes![0].title, mixes![0].tracks)}
               />
             ) : null}
             {trending && trending.length > 0 ? (
               <QuickTile
                 title="Trending now"
-                subtitle="Hot hits right now"
                 artwork={trending[0].artwork}
                 seed="trending"
                 width={quickTileWidth()}
@@ -237,7 +265,9 @@ export function HomeScreen() {
                     artwork={mix.artwork}
                     seed={mix.id}
                     size={150}
-                    onPress={() => openTrackCollection(mix.title, mix.tracks)}
+                    isPlayingContext={contextId === `mix-${mix.id}`}
+                    isPaused={!isPlaying}
+                    onPress={() => openTrackCollection(mix.title, mix.tracks, `mix-${mix.id}`)}
                   />
                 ))}
                 <AICreateCard onPress={() => nav.navigate('AI')} />
@@ -276,7 +306,15 @@ export function HomeScreen() {
                     artwork={t.artwork}
                     seed={t.id}
                     size={150}
-                    onPress={() => play(trending, Math.max(0, trending.findIndex((x) => x.id === t.id)))}
+                    isPlayingContext={contextId === 'trending'}
+                    isPaused={!isPlaying}
+                    onPress={() =>
+                      play(
+                        trending,
+                        Math.max(0, trending.findIndex((x) => x.id === t.id)),
+                        'trending',
+                      )
+                    }
                   />
                 ))}
               </Shelf>
@@ -333,6 +371,7 @@ export function HomeScreen() {
 // Screen width is fixed per device; approximated via Dimensions at module
 // scope for the grid math without re-render churn.
 const globalWidth = Dimensions.get('window').width;
+const globalHeight = Dimensions.get('window').height;
 
 function quickTileWidth(): number {
   // two columns with 8px gutters inside 16px screen padding
@@ -390,6 +429,12 @@ function EmptyHome({ onGoAI }: { onGoAI: () => void }) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  wash: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -400,19 +445,20 @@ const styles = StyleSheet.create({
   },
   chipRow: { flexDirection: 'row', gap: 8 },
   chip: {
-    backgroundColor: colors.card, // #242424 — Spotify inactive chip
+    // repo .chip span: hsla(0,0%,100%,.1), 12px inline padding, 32px height
+    backgroundColor: colors.chipInactiveBg,
     borderRadius: radius.full,
     paddingHorizontal: 14,
     paddingVertical: 7,
   },
-  chipActive: { backgroundColor: colors.accent }, // green — verified in reference
+  chipActive: { backgroundColor: colors.chipActiveBg }, // repo: white pill
   chipText: {
     color: colors.text,
     fontSize: 13,
-    fontWeight: '700',
-    fontFamily: fonts.bold,
+    fontWeight: '500',
+    fontFamily: fonts.medium,
   },
-  chipTextActive: { color: colors.accentDeep }, // black on green
+  chipTextActive: { color: colors.chipActiveText }, // near-black on white
   avatar: {
     width: 34,
     height: 34,

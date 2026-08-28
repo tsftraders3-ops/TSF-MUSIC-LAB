@@ -1,8 +1,15 @@
 /**
- * Shelf — authentic Spotify home primitives:
- *   • Shelf       — section: 22px bold header, "Show all" link, horizontal rail
- *   • ShelfCard   — square cover (6px radius) + bold title + dim subtitle
- *   • QuickTile   — the #2A2A2A home shortcut tile (art + single-line bold label)
+ * Shelf — repo-faithful Spotify home primitives
+ * (reference: francoborrelli/spotify-react-web-client):
+ *
+ *   • Shelf       — section: bold header, "Show all" link, horizontal rail
+ *   • ShelfCard   — square cover (5px radius) + bold title + dim subtitle;
+ *                   green #1ED760 play FAB (40px, soft shadow) fades in over
+ *                   the artwork's bottom-right when this card's context is
+ *                   the one playing — exactly the repo's .circle-play-div.
+ *   • QuickTile   — the home shortcut: translucent 11%-white tile sitting on
+ *                   the artwork-derived gradient wash (repo .horizontal-
+ *                   playlist: hsla(0,0%,100%,.1), 6px radius, bold label).
  */
 
 import React from 'react';
@@ -23,6 +30,8 @@ export function ShelfCard({
   round = false,
   badge,
   subtitleMaxLines = 2,
+  isPlayingContext = false,
+  isPaused = false,
 }: {
   title: string;
   subtitle?: string;
@@ -35,6 +44,9 @@ export function ShelfCard({
   round?: boolean;
   badge?: React.ReactNode;
   subtitleMaxLines?: number;
+  /** this card is the currently-playing context → show the green play FAB */
+  isPlayingContext?: boolean;
+  isPaused?: boolean;
 }) {
   return (
     <PressableScale
@@ -46,6 +58,7 @@ export function ShelfCard({
       <View>
         <Artwork uri={artwork} seed={seed} size={size} variant={round ? 'circle' : 'card'} />
         {badge}
+        {isPlayingContext ? <PlayFab size={40} paused={!!isPaused} /> : null}
       </View>
       <View style={styles.textWrap}>
         <Text style={styles.cardTitle} numberOfLines={1}>
@@ -58,6 +71,43 @@ export function ShelfCard({
         ) : null}
       </View>
     </PressableScale>
+  );
+}
+
+/** Repo CirclePlay: #1ED760 circle, black glyph, 0 8px 8px rgba(0,0,0,.3). */
+export function PlayFab({
+  size = 40,
+  paused = false,
+  onPress,
+}: {
+  size?: number;
+  paused?: boolean;
+  onPress?: () => void;
+}) {
+  const glyphSize = Math.round(size * 0.45);
+  const body = (
+    <View style={[styles.fab, { width: size, height: size, borderRadius: size / 2 }]}>
+      {paused ? (
+        <Ionicons name="play" size={glyphSize} color={colors.black} style={{ marginLeft: 2 }} />
+      ) : (
+        <View style={styles.fabBars}>
+          <View style={[styles.fabBar, { height: glyphSize * 0.55 }]} />
+          <View style={[styles.fabBar, { height: glyphSize }]} />
+          <View style={[styles.fabBar, { height: glyphSize * 0.4 }]} />
+        </View>
+      )}
+    </View>
+  );
+  if (!onPress)
+    return (
+      <View style={[styles.fabWrap, { width: size, height: size }]} pointerEvents="none">
+        {body}
+      </View>
+    );
+  return (
+    <Pressable onPress={onPress} hitSlop={6} style={[styles.fabWrap, { width: size, height: size }]}>
+      {body}
+    </Pressable>
   );
 }
 
@@ -95,8 +145,8 @@ export function Shelf({
 }
 
 /**
- * QuickTile — Spotify home shortcut: #2A2A2A tile, rounded-square artwork
- * flush-left, bold white single-line label.
+ * QuickTile — repo .horizontal-playlist: 10% white on the gradient wash,
+ * 6px radius, square art flush-left, one bold white label (2 lines).
  */
 export function QuickTile({
   title,
@@ -127,13 +177,13 @@ export function QuickTile({
     >
       {icon ? (
         <View style={styles.quickIconTile}>
-          <Ionicons name={icon} size={26} color="#FFFFFF" />
+          <Ionicons name={icon} size={24} color="#FFFFFF" />
         </View>
       ) : (
         <Artwork
           uri={artwork}
           seed={seed}
-          size={60}
+          size={54}
           variant="card"
           liked={liked}
           style={styles.quickArt}
@@ -190,18 +240,35 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   textWrap: { gap: 2, paddingRight: 2 },
+  fab: {
+    backgroundColor: colors.fabGreen,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.45,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
+  fabWrap: {
+    position: 'absolute',
+    right: 8,
+    bottom: 8,
+  },
+  fabBars: { flexDirection: 'row', alignItems: 'flex-end', gap: 2.5, height: 16 },
+  fabBar: { width: 3, borderRadius: 1.5, backgroundColor: colors.black },
   quickTile: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.tile, // #2A2A2A pixel-verified
-    borderRadius: 8,
+    backgroundColor: colors.chipInactiveBg, // 10% white on the gradient wash
+    borderRadius: 6,
     overflow: 'hidden',
-    height: 60,
+    height: 54,
   },
   quickArt: {},
   quickIconTile: {
-    width: 60,
-    height: 60,
+    width: 54,
+    height: 54,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.aiStart,

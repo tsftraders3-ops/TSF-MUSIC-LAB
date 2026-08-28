@@ -24,8 +24,9 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RouteProp } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useProgress } from 'react-native-track-player';
@@ -104,7 +105,13 @@ function ProgressBar({
     >
       <View style={styles.barTrack}>
         <View style={[styles.barFill, { width: `${ratio * 100}%` }]} />
-        {scrubbing ? <View style={[styles.barKnob, { left: `${ratio * 100}%` }]} /> : null}
+        {/* persistent thumb dot — real Spotify shows it at rest too */}
+        <View
+          style={[
+            styles.barKnob,
+            { left: `${ratio * 100}%`, opacity: scrubbing ? 1 : 0.9 },
+          ]}
+        />
       </View>
     </View>
   );
@@ -145,6 +152,13 @@ export function PlayerScreen() {
   const duration = liveDuration > 0 ? liveDuration : active?.duration ?? 0;
 
   const [showQueue, setShowQueue] = useState(false);
+
+  // mini-player queue button opens this screen with the queue sheet up
+  const route = useRoute<RouteProp<RootStackParamList, 'Player'>>();
+  const openQueueParam = !!route.params?.openQueue;
+  useEffect(() => {
+    if (openQueueParam) setShowQueue(true);
+  }, [openQueueParam]);
   const [showMore, setShowMore] = useState(false);
   const [radioLoading, setRadioLoading] = useState(false);
 
@@ -192,8 +206,8 @@ export function PlayerScreen() {
     <View style={styles.root}>
       {/* Spotify's signature: a gradient built from the artwork's own color */}
       <LinearGradient
-        colors={[boostForPlayer(palette.vibrant), palette.dominant, '#121212']}
-        locations={[0, 0.42, 0.85]}
+        colors={[boostForPlayer(palette.dominant), palette.wash, '#121212']}
+        locations={[0, 0.38, 0.82]}
         style={StyleSheet.absoluteFill}
       />
 
@@ -284,20 +298,16 @@ export function PlayerScreen() {
           <PressableScale hitSlop={8} onPress={prev}>
             <Ionicons name="play-skip-back" size={34} color={colors.text} />
           </PressableScale>
-          <PressableScale
-            scaleTo={0.92}
-            haptic
-            onPress={togglePlay}
-            style={styles.playBtn}
-          >
+          {/* real Spotify Android: big plain WHITE glyph, no circle */}
+          <PressableScale scaleTo={0.9} haptic onPress={togglePlay} hitSlop={8}>
             {loading ? (
               <View style={styles.spinner} />
             ) : (
               <Ionicons
                 name={isPlaying ? 'pause' : 'play'}
-                size={34}
-                color={colors.black}
-                style={{ marginLeft: isPlaying ? 0 : 3 }}
+                size={56}
+                color={colors.text}
+                style={{ marginLeft: isPlaying ? 0 : 4 }}
               />
             )}
           </PressableScale>
@@ -557,21 +567,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-evenly',
     marginBottom: 18,
   },
-  playBtn: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: colors.text,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   spinner: {
     width: 26,
     height: 26,
     borderRadius: 13,
     borderWidth: 3,
-    borderColor: 'rgba(0,0,0,0.25)',
-    borderTopColor: colors.black,
+    borderColor: 'rgba(255,255,255,0.3)',
+    borderTopColor: colors.text,
   },
   repeatOne: {
     position: 'absolute',

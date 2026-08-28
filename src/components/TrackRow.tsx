@@ -106,9 +106,8 @@ export function TrackRow({
     };
   }, [track.id]);
 
-  const sub =
-    subtitle ??
-    [track.artist, track.album].filter(Boolean).join(' • ');
+  // real Spotify mobile rows show the artist only — no album on mobile
+  const sub = subtitle ?? track.artist;
 
   return (
     <Pressable

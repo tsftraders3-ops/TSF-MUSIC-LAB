@@ -29,6 +29,8 @@ export interface DynamicPalette {
   deep: string;
   /** brightened vibrant — progress bars, glows, active states */
   glow: string;
+  /** mid-tone dominant — home wash + mini player gradients (repo style) */
+  wash: string;
 }
 
 /* ── color math ─────────────────────────────────────────────────────── */
@@ -161,12 +163,20 @@ function paletteFrom(dominant: string, vibrant: string, key: string): DynamicPal
   const deepS = gray ? 0.26 : clamp(Math.max(dHsl.s, 0.3), 0.24, 0.55);
   const deepRgb = hslToRgb(deepH, deepS, 0.085);
 
+  // --- wash (repo-faithful mid-tone): colorthief dominant, darkened only
+  // when too light — pixel-measured reference onset #cd6430 = HSL(19,63%,50%)
+  const washH = deepH;
+  const washS = gray ? 0.36 : clamp(Math.max(dHsl.s, 0.42), 0.32, 0.65);
+  const washL = clamp(dHsl.l, 0.38, 0.52);
+  const washRgb = hslToRgb(washH, washS, washL);
+
   return {
     key,
     dominant,
     vibrant,
     deep: hex(deepRgb.r, deepRgb.g, deepRgb.b),
     glow: hex(glowRgb.r, glowRgb.g, glowRgb.b),
+    wash: hex(washRgb.r, washRgb.g, washRgb.b),
   };
 }
 

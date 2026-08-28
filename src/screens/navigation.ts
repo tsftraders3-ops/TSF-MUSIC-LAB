@@ -3,7 +3,7 @@ import type { NavigatorScreenParams } from '@react-navigation/native';
 
 export type RootStackParamList = {
   Tabs: NavigatorScreenParams<TabParamList> | undefined;
-  Player: undefined;
+  Player: { openQueue?: boolean } | undefined;
   Collection: { collection: Collection; tracks?: Track[] };
   Playlist: { playlistId: string };
   Stats: undefined;
