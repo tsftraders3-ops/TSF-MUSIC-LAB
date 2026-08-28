@@ -37,11 +37,19 @@ Optional, for full-length international tracks: `brew install yt-dlp`
 
 ## The Android app
 
-The repo ships a **Capacitor** native shell (`android/`). The app is the same
-web experience served by your TSF server — the WebView's origin IS your
-server, so every feature (search, full-length streaming, AI playlists,
-likes, library) works exactly as in Chrome, with a real app icon, splash
-screen and no browser UI.
+The repo ships a **Capacitor** native shell (`android/`). The APK boots a
+**bundled launcher** (`mobile-shell/`) that finds your TSF server at runtime
+(saved address → baked default → manual entry) and then loads the full app
+from it — every feature (search, full-length streaming, AI playlists, likes,
+library) works exactly as in Chrome, with a real app icon, splash screen and
+no browser UI.
+
+**Why a launcher?** If the server is unreachable (Mac asleep, IP changed,
+phone on mobile data), the app shows a friendly "can't reach your server"
+screen with a checklist and a manual address box — never a black screen. It
+auto-retries every few seconds and reconnects the moment your server comes
+back. The server URL you enter manually is remembered (per-app storage), so
+DHCP address changes are a one-time fix, not a rebuild.
 
 **Build it without installing anything locally** — GitHub Actions does it:
 
@@ -49,11 +57,11 @@ screen and no browser UI.
 2. Download the `tsf-music-android` artifact (debug + signed release APK).
 3. Sideload `app-release.apk` onto your phone ("install unknown apps").
 
-The server address baked into the APK comes from the `TSF_SERVER_URL`
-repository secret (default `http://10.125.110.1:3000`). Change the secret →
-rebuild → new APK points at the new address. Signing is fully automated via
-repository secrets (`ANDROID_KEYSTORE_*`), so every release APK upgrades
-cleanly over the previous one — no uninstall/reinstall.
+The default server address baked into the launcher comes from the
+`TSF_SERVER_URL` repository secret (default `http://10.125.110.1:3000`).
+Change the secret → rebuild → new APK tries the new address first. Signing is
+fully automated via repository secrets (`ANDROID_KEYSTORE_*`), so every
+release APK upgrades cleanly over the previous one — no uninstall/reinstall.
 
 > LAN HTTP note: Android 9+ blocks cleartext traffic by default; the shell's
 > manifest already sets `usesCleartextTraffic="true"` for this reason.
@@ -95,11 +103,11 @@ src/                 app code (Next.js App Router)
   lib/               ai engine, jiosaavn, ytdlp, stream resolver, synth
   store/             zustand player/nav/library/preferences
 android/             Capacitor native shell (committed, CI-buildable)
-mobile-shell/        bundled WebView origin (fallback page)
+mobile-shell/        bundled launcher (server discovery + friendly error UI)
 assets/              1024px icon/splash sources (@capacitor/assets)
 scripts/             gauntlets, benchmarks, evidence tooling
 docs/                research notes
-capacitor.config.json  native shell config (server.url lives here)
+capacitor.config.json  native shell config (allowNavigation, cleartext)
 ```
 
 ## CI / CD

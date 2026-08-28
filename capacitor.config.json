@@ -3,8 +3,8 @@
   "appName": "TSF Music",
   "webDir": "mobile-shell",
   "server": {
-    "url": "http://10.125.110.1:3000",
-    "cleartext": true
+    "cleartext": true,
+    "allowNavigation": ["*"]
   },
   "android": {
     "allowUserZoom": false,

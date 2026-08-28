@@ -3,33 +3,114 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#000000" />
   <title>TSF Music</title>
   <style>
-    :root { color-scheme: dark; }
+    :root {
+      color-scheme: dark;
+      --bg: #000;
+      --card: #121212;
+      --card-2: #181818;
+      --text: #ffffff;
+      --muted: #b3b3b3;
+      --faint: #7a7a7a;
+      --green: #1ed760;
+      --green-dim: #0d9440;
+      --red: #ff5252;
+      --amber: #ffb74d;
+    }
     * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { height: 100%; }
     body {
-      background: #000; color: #fff;
+      background: var(--bg); color: var(--text);
       font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       min-height: 100vh; min-height: 100dvh;
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      gap: 18px; padding: 32px; text-align: center;
+      gap: 22px; padding: 28px 22px; text-align: center;
+      -webkit-user-select: none; user-select: none;
     }
     .logo {
-      width: 88px; height: 88px; border-radius: 22px;
+      width: 84px; height: 84px; border-radius: 20px;
       background: linear-gradient(135deg, #1ed760 0%, #0d9440 100%);
       display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 12px 40px rgba(30, 215, 96, 0.25);
+      box-shadow: 0 14px 44px rgba(30, 215, 96, 0.28);
+      flex: none;
     }
-    .logo svg { width: 46px; height: 46px; }
-    h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
-    p  { font-size: 14px; line-height: 1.6; color: #b3b3b3; max-width: 300px; }
-    .pulse { animation: pulse 2s ease-in-out infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.45 } }
-    code { color: #1ed760; font-size: 12px; background: #181818; padding: 2px 7px; border-radius: 6px; }
+    .logo svg { width: 42px; height: 42px; }
+    h1 { font-size: 23px; font-weight: 800; letter-spacing: -0.02em; }
+    .tagline { font-size: 13px; color: var(--muted); margin-top: -14px; }
+
+    .card {
+      width: 100%; max-width: 360px;
+      background: var(--card); border-radius: 16px;
+      padding: 18px 16px; display: flex; flex-direction: column; gap: 14px;
+    }
+    .status-title { font-size: 15px; font-weight: 700; }
+    .status-sub { font-size: 13px; color: var(--muted); line-height: 1.55; }
+
+    .row {
+      display: flex; align-items: center; gap: 10px;
+      background: var(--card-2); border-radius: 10px; padding: 10px 12px;
+      text-align: left; font-size: 12.5px;
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--faint); }
+    .dot.checking { background: var(--amber); animation: pulse 1s ease-in-out infinite; }
+    .dot.ok { background: var(--green); box-shadow: 0 0 8px rgba(30, 215, 96, 0.7); }
+    .dot.bad { background: var(--red); }
+    .row .url { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px; word-break: break-all; }
+    .row .st { margin-left: auto; color: var(--faint); font-size: 11px; flex: none; }
+    .row .st.ok { color: var(--green); }
+    .row .st.bad { color: var(--red); }
+
+    .checklist { text-align: left; display: flex; flex-direction: column; gap: 8px; }
+    .checklist div { font-size: 12.5px; color: var(--muted); line-height: 1.5; padding-left: 20px; position: relative; }
+    .checklist div::before { content: "•"; position: absolute; left: 6px; color: var(--green); font-weight: 700; }
+    code { color: var(--green); font-size: 11.5px; background: #181818; padding: 2px 7px; border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    .field { display: flex; gap: 8px; }
+    input[type=text] {
+      flex: 1; min-width: 0; background: var(--card-2); color: var(--text);
+      border: 1px solid #2a2a2a; border-radius: 10px; padding: 11px 12px;
+      font-size: 13px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      outline: none;
+    }
+    input[type=text]:focus { border-color: var(--green); }
+    input[type=text]::placeholder { color: var(--faint); font-family: inherit; }
+
+    .btn {
+      border: none; border-radius: 10px; padding: 12px 18px;
+      font-size: 13.5px; font-weight: 700; cursor: pointer;
+      background: var(--green); color: #000; flex: none;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn[disabled] { opacity: 0.55; }
+    .btn-ghost {
+      background: transparent; color: var(--muted); border: 1px solid #2e2e2e;
+      padding: 10px 16px; font-weight: 600;
+    }
+    .link-btn { background: none; border: none; color: var(--faint); font-size: 12px; text-decoration: underline; cursor: pointer; padding: 4px; }
+    .msg { font-size: 12px; min-height: 15px; }
+    .msg.err { color: var(--red); }
+    .msg.info { color: var(--amber); }
+    .msg.ok { color: var(--green); }
+
+    .offline {
+      width: 100%; max-width: 360px; background: rgba(255, 82, 82, 0.12);
+      border: 1px solid rgba(255, 82, 82, 0.35); border-radius: 12px;
+      padding: 10px 14px; font-size: 12.5px; color: #ffabab;
+    }
+    footer { font-size: 11px; color: var(--faint); max-width: 340px; line-height: 1.6; }
+    .hidden { display: none !important; }
+
+    .pulse { animation: pulse 1.8s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.4 } }
+    @media (prefers-reduced-motion: reduce) {
+      .pulse, .dot.checking { animation: none; }
+    }
   </style>
 </head>
 <body>
-  <div class="logo">
+  <div class="logo pulse" id="logo">
     <svg viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
       <path d="M9 18V5l12-2v13" />
       <circle cx="6" cy="18" r="3" />
@@ -37,17 +118,292 @@
     </svg>
   </div>
   <h1>TSF Music</h1>
-  <p class="pulse">Connecting to your TSF server…</p>
-  <p>Make sure your server is running and this phone is on the same network.<br /><br />Server: <code id="srv">—</code></p>
+
+  <div class="offline hidden" id="offlineBanner">
+    This phone has no network connection. Connect to Wi-Fi or mobile data and try again.
+  </div>
+
+  <!-- ── SCANNING ─────────────────────────────────────────────── -->
+  <div class="card" id="scanCard">
+    <div>
+      <div class="status-title">Looking for your TSF server…</div>
+      <div class="status-sub">The app runs from your Mac — it just needs to find it on this network.</div>
+    </div>
+    <div id="rows" style="display:flex;flex-direction:column;gap:8px;"></div>
+    <div class="msg info" id="scanMsg"></div>
+  </div>
+
+  <!-- ── CONNECTED ────────────────────────────────────────────── -->
+  <div class="card hidden" id="okCard">
+    <div>
+      <div class="status-title" style="color:var(--green)">✓ Connected</div>
+      <div class="status-sub" id="okSub">Starting TSF Music…</div>
+    </div>
+  </div>
+
+  <!-- ── FAILED ───────────────────────────────────────────────── -->
+  <div class="card hidden" id="failCard">
+    <div>
+      <div class="status-title">Can't reach your TSF server</div>
+      <div class="status-sub">The app itself is fine — the server on your Mac isn't answering. Check:</div>
+    </div>
+    <div class="checklist">
+      <div>Your Mac is awake and the server is running (<code>bun run dev</code>)</div>
+      <div>This phone is on the same Wi-Fi / hotspot as your Mac</div>
+      <div>If your Mac's IP changed, type the new one below (Mac → System Settings → Wi-Fi → Details)</div>
+    </div>
+    <div class="field">
+      <input type="text" id="manualInput" placeholder="e.g. 192.168.1.5:3000" autocomplete="off" spellcheck="false" inputmode="url" />
+      <button class="btn" id="connectBtn">Connect</button>
+    </div>
+    <div class="msg err" id="manualMsg"></div>
+    <div id="failRows" style="display:flex;flex-direction:column;gap:8px;"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+      <button class="btn btn-ghost" id="retryBtn">Retry now</button>
+      <span class="status-sub" id="countdown" style="font-size:11.5px;"></span>
+      <button class="link-btn" id="anywayBtn">Open anyway →</button>
+    </div>
+  </div>
+
+  <footer id="footNote">
+    TSF Music native shell · this screen is bundled inside the app — it works even when the server is offline.
+  </footer>
+
+  <script src="./server-default.js"></script>
   <script>
-    // Fallback landing shell. With `server.url` configured in
-    // capacitor.config.json, Capacitor loads the real app from the server and
-    // this page is never seen. It exists as the bundled origin so the project
-    // builds cleanly and as the foundation for a future offline/settings UI.
-    try {
-      const cfg = window.Capacitor && window.Capacitor.getConfig && window.Capacitor.getConfig()
-      document.getElementById('srv').textContent = (cfg && cfg.server && cfg.server.url) || 'not configured'
-    } catch (e) {}
+  (function () {
+    'use strict';
+    var STORE_KEY = 'tsf-server-url';
+    var PROBE_MS = 3000;
+
+    var DEFAULT_SERVER = (window.__TSF_DEFAULT_SERVER__ || '').trim() || null;
+
+    // ── helpers ────────────────────────────────────────────────
+    function normalizeUrl(v) {
+      v = (v || '').trim();
+      if (!v) return null;
+      if (!/^https?:\/\//i.test(v)) v = 'http://' + v;
+      try {
+        var u = new URL(v);
+        if (!u.hostname) return null;
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+        if (!u.port && u.protocol === 'http:') u.port = '3000'; // bare host → typical dev port
+        return u.origin;
+      } catch (e) { return null; }
+    }
+
+    function candidates() {
+      var list = [];
+      var stored = normalizeUrl(localStorage.getItem(STORE_KEY));
+      if (stored) list.push({ url: stored, label: 'saved' });
+      var def = normalizeUrl(DEFAULT_SERVER);
+      if (def && !list.some(function (c) { return c.url === def; })) list.push({ url: def, label: 'default' });
+      return list;
+    }
+
+    // Probe: readable fetch first (server may send CORS); if it fails for
+    // non-timeout reasons, a no-cors fetch tells reachable vs unreachable.
+    function probe(url, timeoutMs) {
+      timeoutMs = timeoutMs || PROBE_MS;
+      var ctrl = ('AbortController' in window) ? new AbortController() : null;
+      var timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, timeoutMs);
+      var signal = ctrl ? ctrl.signal : undefined;
+
+      function readAttempt() {
+        return fetch(url + '/api/health', { signal: signal, cache: 'no-store' })
+          .then(function (res) {
+            return res.clone().json().catch(function () { return null; }).then(function (info) {
+              clearTimeout(timer);
+              return { reachable: true, opaque: false, info: info };
+            });
+          });
+      }
+      function opaqueAttempt() {
+        return fetch(url + '/api/health', { mode: 'no-cors', signal: signal, cache: 'no-store' })
+          .then(function () { clearTimeout(timer); return { reachable: true, opaque: true, info: null }; });
+      }
+
+      return readAttempt()
+        .catch(function (err) {
+          if (err && err.name === 'AbortError') { clearTimeout(timer); return { reachable: false, reason: 'timeout' }; }
+          return opaqueAttempt().catch(function () {
+            clearTimeout(timer);
+            return { reachable: false, reason: 'no-response' };
+          });
+        });
+    }
+
+    // ── dom ────────────────────────────────────────────────────
+    var el = function (id) { return document.getElementById(id); };
+    var scanCard = el('scanCard'), okCard = el('okCard'), failCard = el('failCard');
+    var rows = el('rows'), failRows = el('failRows'), scanMsg = el('scanMsg');
+    var manualInput = el('manualInput'), manualMsg = el('manualMsg');
+    var countdown = el('countdown');
+
+    function show(card) {
+      [scanCard, okCard, failCard].forEach(function (c) { c.classList.add('hidden'); });
+      card.classList.remove('hidden');
+    }
+
+    function rowHtml(c, state) {
+      var dot = state === 'checking' ? 'checking' : (state === 'ok' ? 'ok' : 'bad');
+      var st = state === 'checking' ? 'checking…'
+             : state === 'ok' ? 'online'
+             : (state === 'timeout' ? 'no response' : 'unreachable');
+      var stCls = state === 'ok' ? 'ok' : (state === 'checking' ? '' : 'bad');
+      return '<div class="row"><span class="dot ' + dot + '"></span>' +
+        '<span class="url">' + c.url.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>' +
+        '<span class="st ' + stCls + '">' + st + '</span></div>';
+    }
+
+    function renderRows(container, list, stateMap) {
+      container.innerHTML = list.map(function (c) {
+        return rowHtml(c, stateMap[c.url] || 'checking');
+      }).join('');
+    }
+
+    // ── flow ───────────────────────────────────────────────────
+    var retryTimer = null;
+    var navigating = false;
+
+    function stopRetry() {
+      if (retryTimer) { clearInterval(retryTimer); retryTimer = null; }
+      countdown.textContent = '';
+    }
+
+    function scheduleRetry(seconds) {
+      stopRetry();
+      var left = seconds;
+      countdown.textContent = 'Auto-retry in ' + left + 's';
+      retryTimer = setInterval(function () {
+        left--;
+        if (left <= 0) { stopRetry(); scan(); }
+        else countdown.textContent = 'Auto-retry in ' + left + 's';
+      }, 1000);
+    }
+
+    function go(url) {
+      if (navigating) return;
+      navigating = true;
+      stopRetry();
+      show(okCard);
+      el('okSub').textContent = 'Connected to ' + url + ' — starting TSF Music…';
+      el('logo').classList.remove('pulse');
+      // Half a second so the user sees the success state before switching.
+      setTimeout(function () { window.location.replace(url); }, 550);
+    }
+
+    function scan() {
+      if (navigating) return;
+      var list = candidates();
+      if (!list.length) {
+        // No default and nothing saved — go straight to manual entry.
+        show(failCard);
+        manualMsg.className = 'msg info';
+        manualMsg.textContent = 'No server address is configured yet — enter your Mac\u2019s address below.';
+        scheduleRetry(10);
+        return;
+      }
+
+      show(scanCard);
+      scanMsg.textContent = '';
+      renderRows(rows, list, {});
+      el('offlineBanner').classList.toggle('hidden', navigator.onLine !== false);
+
+      var settled = false;
+      var t = setTimeout(function () {
+        if (!settled) {
+          settled = true
+          onResults(list, list.map(function (c) { return { reachable: false, reason: 'timeout', url: c.url }; }))
+        }
+      }, PROBE_MS + 1500);
+
+      Promise.all(list.map(function (c) {
+        return probe(c.url).then(function (r) { r.url = c.url; return r; });
+      }))
+        .then(function (results) {
+          if (settled) return;
+          settled = true; clearTimeout(t);
+          onResults(list, results);
+        })
+        .catch(function () {
+          if (settled) return;
+          settled = true; clearTimeout(t);
+          onResults(list, list.map(function () { return { reachable: false, reason: 'no-response' }; }));
+        });
+    }
+
+    function onResults(list, results) {
+      if (navigating) return;
+      var stateMap = {};
+      results.forEach(function (r) {
+        stateMap[r.url] = r.reachable ? 'ok' : (r.reason || 'no-response');
+      });
+      // Priority: candidate order (saved first, then baked default).
+      var winner = null;
+      for (var i = 0; i < results.length; i++) {
+        if (results[i].reachable) { winner = results[i]; break; }
+      }
+
+      if (winner) {
+        renderRows(rows, list, stateMap);
+        scanMsg.className = 'msg ok';
+        scanMsg.textContent = 'Server online.';
+        go(winner.url);
+      } else {
+        renderRows(failRows, list, stateMap);
+        show(failCard);
+        manualMsg.textContent = '';
+        el('offlineBanner').classList.toggle('hidden', navigator.onLine !== false);
+        scheduleRetry(6);
+      }
+    }
+
+    // ── manual connect ─────────────────────────────────────────
+    function connectManual() {
+      var url = normalizeUrl(manualInput.value);
+      manualMsg.className = 'msg';
+      if (!url) {
+        manualMsg.className = 'msg err';
+        manualMsg.textContent = 'Enter a valid address, e.g. 192.168.1.5:3000';
+        return;
+      }
+      manualMsg.className = 'msg info';
+      manualMsg.textContent = 'Checking ' + url + ' …';
+      probe(url, 3500).then(function (r) {
+        if (r.reachable) {
+          localStorage.setItem(STORE_KEY, url);
+          go(url);
+        } else {
+          manualMsg.className = 'msg err';
+          manualMsg.textContent = r.reason === 'timeout'
+            ? 'No response from ' + url + ' — is the server running?'
+            : 'Could not reach ' + url + ' from this phone.';
+        }
+      });
+    }
+
+    el('connectBtn').addEventListener('click', connectManual);
+    manualInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') connectManual(); });
+    el('retryBtn').addEventListener('click', function () { stopRetry(); scan(); });
+    el('anywayBtn').addEventListener('click', function () {
+      var url = normalizeUrl(manualInput.value) || (candidates()[0] && candidates()[0].url);
+      if (url) { localStorage.setItem(STORE_KEY, url); go(url); }
+    });
+
+    // Re-scan when connectivity changes or the app returns to foreground
+    // (e.g. user toggled Wi-Fi, turned the Mac on, then switched back).
+    window.addEventListener('online', function () { if (!navigating) { stopRetry(); scan(); } });
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible' && !navigating) { stopRetry(); scan(); }
+    });
+
+    // Prefill the input with the first candidate for easy editing.
+    var first = candidates()[0];
+    if (first) manualInput.value = first.url.replace(/^https?:\/\//, '');
+
+    scan();
+  })();
   </script>
 </body>
 </html>

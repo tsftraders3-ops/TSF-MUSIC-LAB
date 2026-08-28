@@ -22,6 +22,12 @@ import { db } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
 
+// CORS on GET: lets the native-shell launcher (bundled origin http://localhost)
+// READ this payload to show server status before switching the WebView to the
+// app. Plain GET = simple request, no preflight needed. The launcher also
+// works without CORS (opaque no-cors probe), this only enriches its UI.
+const CORS = { 'Access-Control-Allow-Origin': '*' }
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url)
   const fresh = searchParams.get('fresh') === '1'
@@ -31,7 +37,7 @@ export async function GET(req: Request) {
     const offset = Math.max(0, parseInt(searchParams.get('offset') || '0', 10) || 0)
     const limit = Math.min(200, Math.max(1, parseInt(searchParams.get('limit') || '20', 10) || 20))
     const snap = resolveMetricsSnapshot().reverse().slice(offset, offset + limit)
-    return Response.json({ offset, limit, total: resolveMetricsSnapshot().length, feed: snap })
+    return Response.json({ offset, limit, total: resolveMetricsSnapshot().length, feed: snap }, { headers: CORS })
   }
 
   if (fresh) {
@@ -59,17 +65,20 @@ export async function GET(req: Request) {
     relayInstances = null
   }
 
-  return Response.json({
-    ok: true,
-    time: new Date().toISOString(),
-    providers,
-    anyLive: providers.some((p: any) => p.ok && !p.provider.startsWith('demo')),
-    ytdlp: bin ? { available: true, path: bin.path, version: bin.version } : { available: false },
-    ai: aiStatus(),
-    resolveMetrics: metrics,
-    recentResolves: resolveMetricsSnapshot().slice(-20).reverse(),
-    relayInstances,
-  })
+  return Response.json(
+    {
+      ok: true,
+      time: new Date().toISOString(),
+      providers,
+      anyLive: providers.some((p: any) => p.ok && !p.provider.startsWith('demo')),
+      ytdlp: bin ? { available: true, path: bin.path, version: bin.version } : { available: false },
+      ai: aiStatus(),
+      resolveMetrics: metrics,
+      recentResolves: resolveMetricsSnapshot().slice(-20).reverse(),
+      relayInstances,
+    },
+    { headers: CORS },
+  )
 }
 
 export async function POST(req: Request) {

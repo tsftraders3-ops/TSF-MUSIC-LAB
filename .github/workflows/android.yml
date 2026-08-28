@@ -3,15 +3,18 @@ name: Build Android APK
 # TSF Music native shell factory.
 #
 # What it does:
-#   1. bakes the TSF server URL (secret TSF_SERVER_URL, overridable via
-#      workflow_dispatch input) into capacitor.config.json
-#   2. `cap sync` copies the shell + config into the committed android/ project
+#   1. writes the default TSF server URL (secret TSF_SERVER_URL, overridable via
+#      workflow_dispatch input) into mobile-shell/server-default.js
+#   2. `cap sync` copies the launcher + config into the committed android/ project
 #   3. gradle assembles debug + SIGNED RELEASE APKs (keystore from secrets)
 #   4. uploads both as artifacts; on `v*` tags also publishes a GitHub Release
 #
-# Why no `next build` here: the WebView loads the app from the server at
-# runtime (server.url) — the APK only contains the native shell + fallback
-# page, so this workflow is fast (~3-4 min) and can't break from web changes.
+# Architecture: the APK boots a LOCAL launcher page (bundled in mobile-shell/)
+# that finds the TSF server at runtime (saved URL → baked default → manual
+# entry) and then navigates the WebView to it. The app can never show a black
+# screen again — the launcher renders instantly, offline, and explains any
+# connection problem in plain language. That's why there is no `next build`
+# here: the web app itself is served by the TSF server at runtime.
 
 on:
   workflow_dispatch:
@@ -63,19 +66,11 @@ jobs:
       - name: Install dependencies (capacitor CLI)
         run: bun install --frozen-lockfile
 
-      - name: Bake server URL into capacitor config
+      - name: Bake default server URL into the launcher
         run: |
-          node -e '
-            const fs = require("fs");
-            const cfg = JSON.parse(fs.readFileSync("capacitor.config.json", "utf8"));
-            cfg.server = cfg.server || {};
-            cfg.server.url = process.env.TSF_SERVER_URL;
-            cfg.server.cleartext = String(cfg.server.url).startsWith("http://");
-            fs.writeFileSync("capacitor.config.json", JSON.stringify(cfg, null, 2) + "\n");
-            console.log("capacitor.config.json →", JSON.stringify(cfg.server));
-          '
-        env:
-          TSF_SERVER_URL: ${{ steps.srv.outputs.url }}
+          URL="${{ steps.srv.outputs.url }}"
+          printf 'window.__TSF_DEFAULT_SERVER__ = "%s";\n' "$URL" > mobile-shell/server-default.js
+          echo "mobile-shell/server-default.js →" $(cat mobile-shell/server-default.js)
 
       - name: Capacitor sync (copy shell + config into android/)
         run: bunx cap sync android
