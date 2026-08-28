@@ -303,3 +303,20 @@ Stage Summary:
 - v3.0.0 = MINDBEAT: every play/skip/like becomes graded evidence; the app reads the room, heals queues, explains every pick truthfully, and ships Wrapped-grade stats — 100% on-device, all §10.3 latency budgets met with 30-50× headroom
 - Gauntlet artifacts: scripts/ab2-blind.txt (17/20 v2 win), tests/ai/gauntlet-r2.test.ts (18 regression locks)
 - Reminder: user rotates GitHub token after session
+
+---
+Task ID: 10 (final)
+Agent: Super Z (main agent)
+Task: v3.0.0 ship verification
+
+Work Log:
+- CI: v3.0.0 tag run (33198083588) → SUCCESS; main run (33198081594) → SUCCESS
+- Release auto-published: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v3.0.0 (79.4 MB APK — expo-sqlite native libs for 4 ABIs)
+- APK deep-verified (scripts/verify_v3_apk.py): manifest versionName "3.0.0" (UTF-16 probe); 4 dex; 2.02MB Hermes bundle with ALL 15 MINDBEAT markers (MINDBEAT, Taste DNA, Not for me, BECAUSE_PLAYED, Now Sound, On the Rise, listening clock, vibeSearch, reasonCode, exploration, buildRadioV2, parseIntent, Pick 5, Boost, daypart); webmocks NOT leaked
+- versionCode = 100 + run_number (CI mechanism, monotonic) → in-place upgrade over v2.5.0; same CI keystore
+
+Stage Summary:
+- FINAL SHIP: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v3.0.0 (install this one)
+- v3.0.0 = MINDBEAT: the app now learns from every play/skip/like (graded evidence), reads the room (vibe machine), heals its own queues, explains every recommendation truthfully, and wraps it in Wrapped-grade stats — 100% on-device
+- First launch shows Pick-5 onboarding + the 3.0.0 What's-new dialog; Taste DNA reachable from Your Sound
+- Reminder: user rotates GitHub token after session
