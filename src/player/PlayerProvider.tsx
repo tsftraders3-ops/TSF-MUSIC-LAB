@@ -38,6 +38,8 @@ import type { Track } from '../types';
 import { resolveStreamUrl } from '../api/saavn';
 import { playbackService } from './service';
 import { getRecommendations } from '../ai/engine';
+import { mindbeat } from '../ai/mindbeat';
+import type { SourceSurface } from '../ai/core/types';
 import { useToast } from '../components/Toast';
 import {
   getAutoplay,
@@ -124,7 +126,7 @@ interface PlayerState {
   autoplay: boolean;
   repeat: 'off' | 'queue' | 'track';
   favorites: Set<string>;
-  playQueue: (tracks: Track[], startIndex?: number) => Promise<void>;
+  playQueue: (tracks: Track[], startIndex?: number, surface?: SourceSurface) => Promise<void>;
   togglePlay: () => Promise<void>;
   next: () => Promise<void>;
   prev: () => Promise<void>;
@@ -153,6 +155,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const originalQueue = useRef<Track[]>([]);
   const recentPushed = useRef<string>('');
   const booted = useRef(false);
+  const surfaceRef = useRef<SourceSurface>('user_queue');
+  const pendingSkip = useRef(false);
 
   const refreshQueue = useCallback(async () => {
     try {
@@ -176,6 +180,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         /* first cold start: empty queue */
       }
     })();
+    // MINDBEAT boots behind the UI (cold-start budget §10.3): store opens,
+    // partial listens recover, profile builds async, sessions start.
+    void mindbeat.init();
     getFavorites().then((list) => setFavorites(new Set(list.map((t) => t.id))));
     getSmartShuffleSetting().then(setSmartShuffleState);
     getAutoplay().then(setAutoplayState);
@@ -185,7 +192,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // UI is backgrounded — resync whenever the app comes back.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void refreshQueue();
+      if (state === 'active') {
+        void refreshQueue();
+        void mindbeat.appActive();
+      } else if (state === 'background') {
+        void mindbeat.appBackground();
+      }
     });
     return () => sub.remove();
   }, [refreshQueue]);
@@ -198,9 +210,31 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return activeRN as unknown as Track;
   }, [activeRN]);
 
-  // Record play history + play counts (sanitized — no stream URLs in storage).
+  // Record play history + play counts (sanitized — no stream URLs in storage)
+  // + the graded MINDBEAT listen (L1 ledger: the previous track finalizes,
+  // the new one starts, surface-tagged).
+  const prevTrackId = useRef<string>('');
   useEffect(() => {
-    if (active?.id && active.id !== recentPushed.current) {
+    if (!active?.id || active.id === prevTrackId.current) return;
+    // SINGLE-OWNER RULE (mirror of the service gate): the provider owns
+    // track transitions only while FOREGROUNDED; the background service
+    // owns them otherwise — otherwise both instrument the same change and
+    // the second finalize manufactures a phantom 0ms INSTANT_REJECT.
+    if (AppState.currentState !== 'active') {
+      prevTrackId.current = active.id; // stay in sync; service owns grading
+      return;
+    }
+    const prevId = prevTrackId.current;
+    prevTrackId.current = active.id;
+
+    // Finalize the in-flight listen (skip vs jump distinction captured by
+    // pendingSkip; grading itself is ratio-driven so it stays honest).
+    if (prevId) {
+      void mindbeat.trackFinished(pendingSkip.current, pendingSkip.current ? 'skip' : 'jump');
+      pendingSkip.current = false;
+    }
+
+    if (active.id !== recentPushed.current) {
       recentPushed.current = active.id;
       const { url, localUri, ...meta } = active as any;
       void localUri;
@@ -208,6 +242,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       pushRecent(meta as Track).catch(() => undefined);
       incrementPlayCount(meta as Track).catch(() => undefined);
     }
+    void mindbeat.trackStarted(active as Track, surfaceRef.current);
   }, [active?.id]);
 
   const state = playback?.state;
@@ -240,13 +275,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         artistId: t.artistId,
         explicit: t.explicit,
         isRecommended: t.isRecommended,
+        reason: (t as Track).reason,
+        reasonCode: (t as Track).reasonCode,
+        exploration: (t as Track).exploration,
+        language: (t as Track).language,
+        year: (t as Track).year,
         localUri: local?.localUri || t.localUri,
       } as unknown as RNTrack);
     }
     return playable;
   }
 
-  async function playQueue(tracks: Track[], startIndex = 0): Promise<void> {
+  async function playQueue(tracks: Track[], startIndex = 0, surface: SourceSurface = 'user_playlist'): Promise<void> {
+    surfaceRef.current = surface;
     try {
       await ensureSetup();
       await askNotificationPermission();
@@ -270,15 +311,35 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  /** Interleave AI recommendations into the upcoming queue. */
-  async function injectRecommendations(currentIdx: number): Promise<void> {
+  /**
+   * Smart Shuffle v2 (§9.1): per-slot Decision Engine picks with
+   * vibe-lock, truthful reasons and hygiene — via MINDBEAT. Falls back to
+   * the v2.1 artist-mix engine when the intelligence layer is unavailable
+   * (fallback ladder §10.4: never dumber than v2.1).
+   */
+  async function injectRecommendations(currentIdx: number, healFrom: Track | null = null): Promise<void> {
     try {
       await ensureSetup();
       const rntpQueue = (await TrackPlayer.getQueue()) as unknown as Track[];
       const base = rntpQueue.filter((t) => !t.isRecommended);
-      if (base.length < 2) return;
-      const recs = await getRecommendations(base.slice(currentIdx, currentIdx + 10), 6);
+      if (base.length < 2 && !healFrom) return;
+      const upcoming = rntpQueue.slice(currentIdx + 1);
+
+      let recs: Track[] = await mindbeat.shuffleRecs(upcoming, healFrom);
+      if (!recs.length) {
+        recs = await getRecommendations(base.slice(currentIdx, currentIdx + 10), 6);
+      }
       if (!recs.length) return;
+
+      // Remove stale recs when healing so the reseed replaces them.
+      if (healFrom) {
+        const removeIdx = rntpQueue
+          .map((t, i) => (t.isRecommended && i > currentIdx ? i : -1))
+          .filter((i) => i >= 0)
+          .sort((a, b) => b - a);
+        for (const i of removeIdx) await TrackPlayer.remove(i).catch(() => undefined);
+      }
+
       let insertAt = currentIdx + 1;
       for (const rec of recs.slice(0, 6)) {
         const playable = await buildPlayable([{ ...rec, isRecommended: true }]);
@@ -309,6 +370,24 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }
 
   async function next(): Promise<void> {
+    // Queue healing (§9.1): skipping a RECOMMENDED track immediately
+    // re-seeds the remaining rec slots away from what was rejected.
+    try {
+      const idx = await TrackPlayer.getActiveTrackIndex();
+      if (idx != null) {
+        const current = (await TrackPlayer.getTrack(idx)) as unknown as Track | null;
+        mindbeat.markPendingSkip();
+        pendingSkip.current = true;
+        if (current?.isRecommended && smartShuffle) {
+          void mindbeat.trackFinished(true, 'skip');
+          void injectRecommendations(idx, current as Track);
+          await TrackPlayer.skipToNext().catch(() => undefined);
+          return;
+        }
+      }
+    } catch {
+      /* fall through to plain skip */
+    }
     await TrackPlayer.skipToNext().catch(() => undefined);
   }
 
@@ -326,6 +405,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }
 
   async function seek(seconds: number): Promise<void> {
+    try {
+      const pos = (await TrackPlayer.getProgress().catch(() => null))?.position ?? 0;
+      void mindbeat.seek(pos * 1000, Math.max(0, seconds) * 1000);
+    } catch {
+      /* seek evidence is best-effort */
+    }
     await TrackPlayer.seekTo(Math.max(0, seconds)).catch(() => undefined);
   }
 
@@ -424,6 +509,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       else nextSet.delete(track.id);
       return nextSet;
     });
+    // Heart evidence into the ledger (+4.0, slowest-decaying tier §5.2).
+    if (nowFav) void mindbeat.liked(track, surfaceRef.current);
+    else void mindbeat.unliked(track);
     toast.show({
       message: nowFav ? 'Added to Liked Songs' : 'Removed from Liked Songs',
       icon: nowFav ? 'heart' : 'heart-dislike-outline',
@@ -438,6 +526,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const currentIdx = await TrackPlayer.getActiveTrackIndex();
       await TrackPlayer.add(playable, (currentIdx ?? -1) + 1);
       await refreshQueue();
+      void mindbeat.queueAdded(track, surfaceRef.current);
       toast.show({ message: `Playing next: ${track.title}`, icon: 'play' });
     } catch {
       toast.show({ message: 'Could not queue that song', icon: 'alert-outline' });
@@ -462,8 +551,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const rntpQueue = (await TrackPlayer.getQueue()) as unknown as Track[];
       const idx = rntpQueue.findIndex((t) => t.id === trackId);
       if (idx >= 0) {
+        const wasRec = !!rntpQueue[idx]!.isRecommended;
         await TrackPlayer.remove(idx);
         await refreshQueue();
+        // Removing a recommendation is a negative signal (§5.1 QUEUE_REMOVE).
+        void mindbeat.queueRemoved(trackId, wasRec);
         toast.show({ message: 'Removed from queue', icon: 'remove' });
       }
     } catch {

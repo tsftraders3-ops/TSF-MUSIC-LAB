@@ -25,6 +25,9 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import type { Track } from '../types';
 import { searchMusic } from '../api/music';
+import { vibeSearch } from '../ai/surfaces/search';
+import { mindbeat } from '../ai/mindbeat';
+import { searchSaavnClean } from '../api/saavn';
 import { getTrending } from '../api/saavn';
 import { usePlayer } from '../player/PlayerProvider';
 import {
@@ -63,6 +66,8 @@ export function SearchScreen() {
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [browseArt, setBrowseArt] = useState<string[]>([]);
   const [searched, setSearched] = useState(false);
+  const [vibe, setVibe] = useState(false); // Keyword | Vibe mode (§9.8)
+  const [vibeChips, setVibeChips] = useState<string[]>([]);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchGen = useRef(0);
 
@@ -74,31 +79,56 @@ export function SearchScreen() {
       .catch(() => undefined);
   }, []);
 
-  const runSearch = useCallback(async (q: string) => {
-    if (!q.trim()) {
-      searchGen.current += 1;
-      setResults([]);
-      setSearched(false);
-      return;
-    }
-    const gen = ++searchGen.current;
-    setLoading(true);
-    setSearched(true);
-    try {
-      const { tracks, degraded: dg } = await searchMusic(q);
-      if (gen !== searchGen.current) return; // stale response — ignore
-      setResults(tracks);
-      setDegraded(dg);
-      if (tracks.length) await pushRecentSearch(q);
-      setRecentSearches(await getRecentSearches());
-    } catch {
-      if (gen !== searchGen.current) return;
-      setResults([]);
-      setDegraded(true);
-    } finally {
-      if (gen === searchGen.current) setLoading(false);
-    }
-  }, []);
+  const runSearch = useCallback(
+    async (q: string) => {
+      if (!q.trim()) {
+        searchGen.current += 1;
+        setResults([]);
+        setVibeChips([]);
+        setSearched(false);
+        return;
+      }
+      const gen = ++searchGen.current;
+      setLoading(true);
+      setSearched(true);
+      try {
+        if (vibe) {
+          // Vibe mode (§9.8): the S1 intent parser reads the query, typos
+          // and Hinglish included; results ranked by mood/energy fit.
+          const r = await vibeSearch(
+            { search: (qq, limit) => searchSaavnClean(qq, limit) },
+            q,
+            25,
+          );
+          if (gen !== searchGen.current) return;
+          setResults(r.tracks);
+          setDegraded(false);
+          setVibeChips([
+            ...r.intent.moods.slice(0, 2),
+            ...r.intent.languages.slice(0, 1),
+            ...(r.shortcut ? [r.shortcut.label] : []),
+          ]);
+          void mindbeat.searchQueried(q, r.tracks.length);
+        } else {
+          const { tracks, degraded: dg } = await searchMusic(q);
+          if (gen !== searchGen.current) return; // stale response — ignore
+          setResults(tracks);
+          setDegraded(dg);
+          setVibeChips([]);
+          void mindbeat.searchQueried(q, tracks.length);
+        }
+        await pushRecentSearch(q);
+        setRecentSearches(await getRecentSearches());
+      } catch {
+        if (gen !== searchGen.current) return;
+        setResults([]);
+        setDegraded(true);
+      } finally {
+        if (gen === searchGen.current) setLoading(false);
+      }
+    },
+    [vibe],
+  );
 
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
@@ -111,7 +141,8 @@ export function SearchScreen() {
 
   const play = (index: number) => {
     if (!results.length) return;
-    playQueue(results, index);
+    playQueue(results, index, 'search');
+    void mindbeat.searchClicked(results[index]!.id, index);
     Keyboard.dismiss();
     nav.navigate('Player');
   };
@@ -133,8 +164,28 @@ export function SearchScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      {/* Spotify search field */}
+      {/* Spotify search field + Keyword|Vibe mode toggle (§9.8) */}
       <View style={styles.searchWrap}>
+        <View style={styles.modeRow}>
+          {([false, true] as const).map((v) => (
+            <PressableScale
+              key={v ? 'vibe' : 'kw'}
+              haptic
+              onPress={() => {
+                setVibe(v);
+                if (query.trim()) runSearch(query);
+              }}
+              style={[styles.modeChip, vibe === v && styles.modeChipOn]}
+            >
+              <Ionicons
+                name={v ? 'sparkles' : 'text'}
+                size={12}
+                color={vibe === v ? colors.textOnGreen : colors.textDim}
+              />
+              <Text style={[styles.modeChipText, vibe === v && styles.modeChipTextOn]}>{v ? 'Vibe' : 'Keyword'}</Text>
+            </PressableScale>
+          ))}
+        </View>
         <View style={styles.inputRow}>
           <Ionicons name="search" size={21} color={colors.textDim} />
           <TextInput
@@ -154,6 +205,19 @@ export function SearchScreen() {
           ) : null}
         </View>
       </View>
+
+      {/* Vibe-mode parsed-intent chips (§9.8) */}
+      {!showBrowse && vibeChips.length > 0 ? (
+        <View style={styles.vibeChipsRow}>
+          {vibeChips.map((c) => (
+            <View key={c} style={styles.vibeChip}>
+              <Text style={styles.vibeChipText} numberOfLines={1}>
+                {c}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
 
       {showBrowse ? (
         <FlatList
@@ -258,6 +322,29 @@ export function SearchScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   searchWrap: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md - 2 },
+  modeRow: { flexDirection: 'row', gap: 8, marginBottom: 8 },
+  modeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: colors.cardDim,
+  },
+  modeChipOn: { backgroundColor: colors.accentBright },
+  modeChipText: { color: colors.textDim, fontSize: 12, fontFamily: fonts.medium },
+  modeChipTextOn: { color: colors.textOnGreen, fontWeight: '700', fontFamily: fonts.bold },
+  vibeChipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: spacing.lg, paddingBottom: 6 },
+  vibeChip: {
+    backgroundColor: colors.surface,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  vibeChipText: { color: colors.aiEnd, fontSize: 11, fontFamily: fonts.medium },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',

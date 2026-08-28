@@ -18,9 +18,11 @@ import { PremiumScreen } from './src/screens/PremiumScreen';
 import { CollectionScreen } from './src/screens/CollectionScreen';
 import { PlaylistScreen } from './src/screens/PlaylistScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
+import { TasteScreen } from './src/screens/TasteScreen';
 import { PlayerScreen } from './src/screens/PlayerScreen';
 import { DynamicThemeProvider } from './src/theme/DynamicThemeProvider';
 import { WhatsNewDialog } from './src/components/WhatsNewDialog';
+import { OnboardingPick5 } from './src/components/OnboardingPick5';
 import type { RootStackParamList, TabParamList } from './src/screens/navigation';
 import { colors } from './src/theme';
 
@@ -153,6 +155,7 @@ export default function App() {
             <NavigationContainer theme={navTheme}>
               <StatusBar style="light" backgroundColor={colors.bg} />
               <WhatsNewDialog />
+              <OnboardingPick5 onDone={() => undefined} />
               <Stack.Navigator
                 screenOptions={{
                   headerShown: false,
@@ -173,6 +176,11 @@ export default function App() {
                 <Stack.Screen
                   name="Stats"
                   component={StatsScreen}
+                  options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
+                  name="Taste"
+                  component={TasteScreen}
                   options={{ animation: 'slide_from_right' }}
                 />
                 <Stack.Screen

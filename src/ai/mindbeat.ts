@@ -1,0 +1,518 @@
+/**
+ * MINDBEAT facade — the app's single intelligence entry point.
+ *
+ * init() is performance-shaped (§10.3): the store opens fast, the profile
+ * build is deferred off the first render, surfaces get skeletons meanwhile.
+ * Every player/screen hook routes through here; nothing outside src/ai
+ * touches the ledger directly.
+ */
+
+import { Platform } from 'react-native';
+import { EventLedger } from './core/ledger';
+import { buildProfile, emptyProfile, topArtists } from './core/profile';
+import { createLedgerStore } from './core/storeSqlite'; // web → storeMemory via metro redirect
+import { SessionBrain } from './core/session';
+import { estimateFeatures } from './core/features';
+import type { ListenRecord, ReasonCode, SessionRecord, SourceSurface, TasteProfile } from './core/types';
+import type { Track } from '../types';
+import { getFavorites, getSmartShuffleSetting } from '../storage/store';
+import { buildRadioV2 } from './surfaces/radio';
+import { buildShuffleRecs } from './surfaces/shuffle';
+import { buildDailyMixesV2, shouldRefreshMixes, type DailyMixV2 } from './surfaces/mixes';
+import { buildNowSound, type NowSoundCard } from './surfaces/daylist';
+import { buildOnTheRise, type OnTheRiseCard } from './surfaces/ontherise';
+import { searchSaavnClean, getArtistTracks } from '../api/saavn';
+
+const CATALOG = {
+  search: (q: string, limit = 20) => searchSaavnClean(q, limit),
+  artistTracks: (a: string, limit = 14) => getArtistTracks(a, limit),
+  trending: async () => [] as Track[],
+};
+
+type ProfileListener = (p: TasteProfile) => void;
+
+class Mindbeat {
+  ledger: EventLedger | null = null;
+  brain: SessionBrain | null = null;
+  profile: TasteProfile = emptyProfile(0);
+  private store: Awaited<ReturnType<typeof createLedgerStore>> | null = null;
+  private listeners = new Set<ProfileListener>();
+  private initPromise: Promise<void> | null = null;
+  private mixesCache: { at: number; mixes: DailyMixV2[]; yesterdayIds: Set<string>; sessionsAtBuild: number } | null = null;
+  private nowSoundCache: { at: number; card: NowSoundCard | null } | null = null;
+  private riseCache: { at: number; card: OnTheRiseCard | null } | null = null;
+  private sessionCountAtBoot = 0;
+  private disabled = false;
+
+  /** Boot: open store, recover, start session. Profile builds async after. */
+  init(): Promise<void> {
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = (async () => {
+      try {
+        this.store = await createLedgerStore();
+        this.ledger = new EventLedger(this.store);
+        await this.ledger.init();
+        await this.ledger.onAppActive();
+        this.brain = new SessionBrain(Date.now(), this.ledger.activeSessionId || 's-live');
+        // Kill switch must survive restarts (§10.4).
+        this.disabled = (await this.kvGet<boolean>('intelligenceDisabled')) === true;
+        // Instant profile from the snapshot while the full rebuild runs behind
+        // it (cold-start budget <80ms, §10.3).
+        const snapshot = await this.kvGet<TasteProfile>('profileSnapshot');
+        if (snapshot && snapshot.builtAt) this.profile = snapshot;
+        this.listeners.forEach((fn) => fn(this.profile));
+        void this.rebuildProfile();
+      } catch {
+        // Intelligence layer must never block the app (fallback ladder §10.4).
+        this.ledger = null;
+      }
+    })();
+    return this.initPromise;
+  }
+
+  /** Await boot readiness (idempotent) — surfaces call this first. */
+  ready(): Promise<void> {
+    return this.initPromise ?? Promise.resolve();
+  }
+
+  private rebuildChain: Promise<TasteProfile> = Promise.resolve(emptyProfile(0));
+  private rebuildTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Debounced rebuild — rapid likes fire ONE rebuild, not three. */
+  scheduleRebuild(delayMs = 1500): void {
+    if (this.rebuildTimer) clearTimeout(this.rebuildTimer);
+    this.rebuildTimer = setTimeout(() => {
+      this.rebuildTimer = null;
+      void this.rebuildProfile();
+    }, delayMs);
+  }
+
+  /** Full profile rebuild from the ledger (serialized; callers may debounce). */
+  async rebuildProfile(): Promise<TasteProfile> {
+    const run = this.rebuildChain.then(() => this.rebuildProfileInner());
+    this.rebuildChain = run.catch(() => this.profile);
+    return run;
+  }
+
+  private async rebuildProfileInner(): Promise<TasteProfile> {
+    if (!this.ledger) return this.profile;
+    try {
+      const t0 = Date.now();
+      const [listens, sessions, events] = await Promise.all([
+        this.ledger.getListens(180),
+        this.ledger.getSessions(180),
+        this.ledger.getEventsSince(Date.now() - 180 * 86400_000),
+      ]);
+      const favorites = await getFavorites().catch(() => [] as Track[]);
+      const seeds = (await this.kvGet<string[]>('onboardingSeeds')) ?? [];
+      const seedTs = (await this.kvGet<number>('onboardingSeedTs')) ?? Date.now();
+      const priorCorrections = this.profile?.corrections;
+      const profile = buildProfile(listens, events, sessions, {
+        now: Date.now(),
+        onboardingSeeds: seeds,
+        onboardingSeedTs: seedTs,
+        corrections: priorCorrections,
+      });
+      // Liked songs are heart-tier evidence even before a TRACK_LIKE event lands.
+      for (const f of favorites.slice(0, 200)) {
+        const key = f.artist.trim().toLowerCase();
+        if (key && profile.artists[key]?.source !== 'heart') {
+          profile.artists[key] = profile.artists[key] ?? {
+            w: 2.5,
+            lastEventTs: Date.now(),
+            evidenceCount: 1,
+            source: 'heart',
+          };
+          if (!profile.artists[key]) continue;
+          profile.artists[key]!.w = Math.max(profile.artists[key]!.w, 2.5);
+          profile.artists[key]!.source = 'heart';
+        }
+      }
+      this.profile = profile;
+      this.sessionCountAtBoot = sessions.length;
+      await this.kvSet('profileSnapshot', profile);
+      this.listeners.forEach((fn) => fn(profile));
+      void t0;
+    } catch {
+      /* keep last good profile */
+    }
+    return this.profile;
+  }
+
+  onProfile(fn: ProfileListener): () => void {
+    this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
+  }
+
+  // ── Player instrumentation (called by PlayerProvider / service) ──────
+
+  async trackStarted(track: Track, surface: SourceSurface): Promise<void> {
+    if (!this.ledger || this.disabled) return;
+    const feats = estimateFeatures({ artist: track.artist, title: track.title, album: track.album });
+    await this.ledger.trackStarted(
+      {
+        trackId: track.id,
+        artist: track.artist,
+        artistId: track.artistId,
+        title: track.title,
+        language: track.language,
+        year: track.year,
+        durationMs: (track.duration || 210) * 1000,
+        energy: feats.energy,
+        valence: feats.valence,
+        wasRecommended: !!track.isRecommended,
+        reasonCode: track.reasonCode as ReasonCode | undefined,
+        explorationSlot: !!track.exploration,
+      },
+      surface,
+    );
+    if (track.isRecommended) {
+      await this.ledger.recExposed(track.id, surface, 0, !!track.exploration);
+    }
+  }
+
+  async heartbeat(elapsedMs: number): Promise<void> {
+    await this.ledger?.heartbeat(elapsedMs);
+  }
+
+  async seek(fromMs: number, toMs: number): Promise<void> {
+    await this.ledger?.seek(fromMs, toMs);
+  }
+
+  markPendingSkip(): void {
+    this.ledger?.markPendingSkip();
+  }
+
+  /** Finalize + fold the listen into the session brain (skip storms etc.). */
+  async trackFinished(userInitiated: boolean, cause: 'skip' | 'end' | 'jump' | 'background' = 'end'): Promise<void> {
+    if (!this.ledger) return;
+    const record = await this.ledger.finalizeTrack(userInitiated, cause);
+    if (record && this.brain) this.brain.push(record);
+  }
+
+  async appBackground(): Promise<void> {
+    // The in-flight listen is NOT finalized here — audio typically keeps
+    // playing in the background and the service keeps feeding heartbeats;
+    // crash recovery covers the killed-mid-track case (§5.5).
+    await this.ledger?.onAppBackground();
+  }
+
+  async appActive(): Promise<void> {
+    await this.ledger?.onAppActive();
+  }
+
+  async liked(track: Track, surface: SourceSurface): Promise<void> {
+    await this.ledger?.liked(track, surface);
+    this.scheduleRebuild();
+  }
+
+  async unliked(track: Track): Promise<void> {
+    await this.ledger?.unliked(track);
+    this.scheduleRebuild();
+  }
+
+  async queueAdded(track: Track, surface: SourceSurface): Promise<void> {
+    await this.ledger?.queueAdded(track, surface);
+  }
+
+  async queueRemoved(trackId: string, wasRecommended: boolean): Promise<void> {
+    await this.ledger?.queueRemoved(trackId, wasRecommended);
+  }
+
+  async searchQueried(query: string, resultCount: number): Promise<void> {
+    await this.ledger?.searchQueried(query, resultCount);
+  }
+
+  async searchClicked(trackId: string, rank: number): Promise<void> {
+    await this.ledger?.searchClicked(trackId, rank);
+  }
+
+  /** Ledger passthrough for the background service. */
+  get ledgerApi(): EventLedger | null {
+    return this.ledger;
+  }
+
+  async notForMe(track: Track, surface: SourceSurface): Promise<void> {
+    await this.ledger?.notForMe(track.id, surface, track.reasonCode);
+    // Explicit negative blocks immediately (§5.2).
+    this.profile.corrections.mutedTracks.push(track.id);
+    void this.rebuildProfile();
+  }
+
+  /** Taste DNA actions (§6.6): boost ×2, mute, un-mute. */
+  async boostArtist(artist: string): Promise<void> {
+    const key = artist.trim().toLowerCase();
+    this.profile.corrections.boosts[key] = 2;
+    await this.persistCorrections();
+  }
+
+  async muteArtist(artist: string): Promise<void> {
+    const key = artist.trim().toLowerCase();
+    if (!this.profile.corrections.mutedArtists.includes(key)) {
+      this.profile.corrections.mutedArtists.push(key);
+    }
+    await this.persistCorrections();
+  }
+
+  async unmuteArtist(artist: string): Promise<void> {
+    const key = artist.trim().toLowerCase();
+    this.profile.corrections.mutedArtists = this.profile.corrections.mutedArtists.filter((a) => a !== key);
+    await this.persistCorrections();
+  }
+
+  private async persistCorrections(): Promise<void> {
+    await this.kvSet('corrections', this.profile.corrections);
+    this.listeners.forEach((fn) => fn(this.profile));
+  }
+
+  async setOnboardingSeeds(artists: string[]): Promise<void> {
+    await this.kvSet('onboardingSeeds', artists);
+    await this.kvSet('onboardingSeedTs', Date.now());
+    await this.rebuildProfile();
+  }
+
+  /** Kill switch: disable all recommendations (classic-only, §10.4). */
+  async setDisabled(off: boolean): Promise<void> {
+    this.disabled = off;
+    await this.kvSet('intelligenceDisabled', off);
+  }
+
+  async isDisabled(): Promise<boolean> {
+    if (this.disabled) return true;
+    const v = await this.kvGet<boolean>('intelligenceDisabled');
+    this.disabled = v === true;
+    return this.disabled;
+  }
+
+  /** Reset the whole taste model (one button, §6.6). */
+  async resetProfile(): Promise<void> {
+    await this.kvSet('onboardingSeeds', []);
+    await this.kvSet('onboardingSeedTs', Date.now());
+    await this.kvSet('corrections', { mutedArtists: [], mutedTracks: [], boosts: {}, wrongLabels: [] });
+    this.profile = emptyProfile(Date.now());
+    try {
+      await this.store?.deleteEventsBefore(Date.now());
+      await this.store?.deleteListensBefore(Date.now());
+    } catch {
+      /* best-effort */
+    }
+    // Sessions + surface caches reset too — nothing pre-reset survives.
+    try {
+      const sessions = await this.store?.getSessions() ?? [];
+      for (const s of sessions) {
+        await this.store?.upsertSession({ ...s, trackCount: 0, totalListenMs: 0, endTs: s.startTs });
+      }
+    } catch {
+      /* best-effort */
+    }
+    this.mixesCache = null;
+    this.nowSoundCache = null;
+    this.riseCache = null;
+    this.brain = new SessionBrain(Date.now());
+    this.listeners.forEach((fn) => fn(this.profile));
+  }
+
+  /** Export: full profile + ledger as JSON (the user's data, literally). */
+  async exportJSON(): Promise<string> {
+    const listens = this.ledger ? await this.ledger.getListens(180) : [];
+    const sessions = this.ledger ? await this.ledger.getSessions(180) : [];
+    return JSON.stringify({ profile: this.profile, listens, sessions, exportedAt: new Date().toISOString() }, null, 2);
+  }
+
+  // ── Surface queries (all degrade gracefully, §10.4) ──────────────────
+
+  private surfaceCtx() {
+    return {
+      api: CATALOG,
+      profile: this.profile,
+      session: this.brain?.state ?? new SessionBrain(Date.now()).state,
+      now: Date.now(),
+      listens: [] as ListenRecord[],
+      onExposure: (trackId: string, surface: SourceSurface, rank: number, exploration: boolean) => {
+        void this.ledger?.recExposed(trackId, surface, rank, exploration);
+      },
+    };
+  }
+
+  async radio(seed: Track, count = 12) {
+    await this.ready();
+    if (this.disabled || !this.ledger) return [];
+    const ctx = this.surfaceCtx();
+    ctx.listens = await this.ledger.getListens(7);
+    try {
+      return await buildRadioV2(ctx, seed, count);
+    } catch {
+      return [];
+    }
+  }
+
+  async shuffleRecs(upcoming: Track[], healFrom?: Track | null) {
+    await this.ready();
+    if (this.disabled || !this.ledger) return [];
+    const ctx = this.surfaceCtx();
+    ctx.listens = await this.ledger.getListens(7);
+    try {
+      return await buildShuffleRecs(ctx, upcoming, { healFrom: healFrom ?? null });
+    } catch {
+      return [];
+    }
+  }
+
+  async dailyMixes(force = false): Promise<DailyMixV2[]> {
+    await this.ready();
+    if (this.disabled || !this.ledger) return [];
+    const now = Date.now();
+    const sessions = await this.ledger.getSessions(1);
+    const cacheAt = this.mixesCache?.at ?? 0;
+    const since = this.mixesCache ? sessions.filter((s: SessionRecord) => s.startTs > cacheAt).length : 99;
+    if (
+      !force &&
+      this.mixesCache &&
+      !shouldRefreshMixes(cacheAt, since, now)
+    ) {
+      return this.mixesCache.mixes;
+    }
+    const ctx = this.surfaceCtx();
+    ctx.listens = await this.ledger.getListens(7);
+    try {
+      const yesterdayIds = new Set((this.mixesCache?.mixes ?? []).flatMap((m) => m.tracks.map((t) => t.id)));
+      const mixes = await buildDailyMixesV2(ctx, yesterdayIds);
+      if (mixes.length) {
+        this.mixesCache = { at: now, mixes, yesterdayIds, sessionsAtBuild: this.sessionCountAtBoot };
+      }
+      return mixes;
+    } catch {
+      return this.mixesCache?.mixes ?? [];
+    }
+  }
+
+  async nowSound(force = false): Promise<NowSoundCard | null> {
+    await this.ready();
+    if (this.disabled || !this.ledger) return null;
+    const now = Date.now();
+    const blockChanged = this.nowSoundCache && new Date(this.nowSoundCache.at).getHours() !== new Date(now).getHours();
+    if (!force && this.nowSoundCache && !blockChanged) return this.nowSoundCache.card;
+    const ctx = this.surfaceCtx();
+    ctx.listens = await this.ledger.getListens(7);
+    try {
+      const card = await buildNowSound(ctx);
+      this.nowSoundCache = { at: now, card };
+      return card;
+    } catch {
+      return this.nowSoundCache?.card ?? null;
+    }
+  }
+
+  async onTheRise(force = false): Promise<OnTheRiseCard | null> {
+    await this.ready();
+    if (this.disabled || !this.ledger) return null;
+    const now = Date.now();
+    const weekFresh = this.riseCache && now - this.riseCache.at < 7 * 86400_000;
+    if (!force && weekFresh) return this.riseCache!.card;
+    const ctx = this.surfaceCtx();
+    ctx.listens = await this.ledger.getListens(30);
+    try {
+      const card = await buildOnTheRise(ctx);
+      this.riseCache = { at: now, card };
+      return card;
+    } catch {
+      return this.riseCache?.card ?? null;
+    }
+  }
+
+  /** Ledger-derived stats (§9.7 — Your Sound v2). */
+  async stats(): Promise<{
+    minutes: number;
+    streams: number; // 30-second rule
+    topArtists: Array<{ artist: string; plays: number }>;
+    topTracks: Array<{ track: Track; plays: number }>;
+    byHour: number[]; // 24 buckets of stream counts
+    streakDays: number;
+    skipRate: number;
+    sessions: number;
+  } | null> {
+    await this.ready();
+    if (!this.ledger) return null;
+    const listens = await this.ledger.getListens(180);
+    const sessions = await this.ledger.getSessions(180);
+    let minutes = 0;
+    let streams = 0;
+    let skipped = 0;
+    const byHour = new Array(24).fill(0);
+    const artistAgg = new Map<string, number>();
+    const trackAgg = new Map<string, { track: Track; plays: number }>();
+    const daySet = new Set<string>();
+    for (const l of listens) {
+      const listenedMin = l.listenedMs / 60000;
+      const counted = l.listenedMs >= 30000; // the 30-second rule
+      if (counted) {
+        streams += 1;
+        minutes += listenedMin;
+        byHour[new Date(l.startedTs).getHours()] += 1;
+        daySet.add(new Date(l.startedTs).toDateString());
+        artistAgg.set(l.artist, (artistAgg.get(l.artist) ?? 0) + 1);
+        const agg = trackAgg.get(l.trackId);
+        if (agg) agg.plays += 1;
+        else if (l.title) {
+          trackAgg.set(l.trackId, {
+            track: {
+              id: l.trackId,
+              title: l.title ?? 'Unknown',
+              artist: l.artist,
+              artwork: '',
+              duration: Math.round(l.durationMs / 1000),
+              source: 'saavn',
+              previewOnly: false,
+            },
+            plays: 1,
+          });
+        }
+      }
+      if (l.grade === 'INSTANT_REJECT' || l.grade === 'EARLY_SKIP') skipped += 1;
+    }
+    // Streak: consecutive days ending today with ≥1 stream.
+    let streakDays = 0;
+    const today = new Date();
+    for (let i = 0; i < 365; i++) {
+      const d = new Date(today.getTime() - i * 86400_000).toDateString();
+      if (daySet.has(d)) streakDays += 1;
+      else if (i > 0) break;
+    }
+    return {
+      minutes: Math.round(minutes),
+      streams,
+      topArtists: [...artistAgg.entries()].map(([artist, plays]) => ({ artist, plays })).sort((a, b) => b.plays - a.plays).slice(0, 8),
+      topTracks: [...trackAgg.values()].sort((a, b) => b.plays - a.plays).slice(0, 10),
+      byHour,
+      streakDays,
+      skipRate: listens.length ? skipped / listens.length : 0,
+      sessions: sessions.length,
+    };
+  }
+
+  /** Top artists (compat with v2.1 engine consumers). */
+  topArtistNames(n = 6): string[] {
+    return topArtists(this.profile, Date.now(), n).map((a) => a.artist);
+  }
+
+  // ── kv passthrough ────────────────────────────────────────────────────
+
+  async kvGet<T>(key: string): Promise<T | null> {
+    try {
+      return (await this.store?.getKV<T>(`mb.${key}`)) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async kvSet<T>(key: string, value: T): Promise<void> {
+    try {
+      await this.store?.setKV(`mb.${key}`, value);
+    } catch {
+      /* best-effort */
+    }
+  }
+}
+
+export const mindbeat = new Mindbeat();
+void Platform;

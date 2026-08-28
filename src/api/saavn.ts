@@ -134,6 +134,8 @@ function mapSaavnSong(raw: any): Track | null {
     previewOnly: false,
     has320: mi?.['320kbps'] === 'true' || raw?.['320kbps'] === 'true' || undefined,
     explicit: truthyExplicit(mi?.explicit_content ?? raw?.explicit_content),
+    language: String(mi?.language ?? raw?.language ?? '').toLowerCase() || undefined,
+    year: parseInt(mi?.year ?? raw?.year ?? '0', 10) || undefined,
   };
 }
 

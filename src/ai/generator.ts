@@ -154,7 +154,7 @@ export function parsePrompt(prompt: string) {
 }
 
 /** Build the set of search queries implied by the prompt. */
-function buildQueries(detected: ReturnType<typeof parsePrompt>): string[] {
+export function buildQueries(detected: ReturnType<typeof parsePrompt>): string[] {
   const queries: string[] = [];
   detected.artists.forEach((a) => queries.push(a));
 

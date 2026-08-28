@@ -23,6 +23,15 @@ export interface Track {
   previewOnly: boolean;
   /** JioSaavn 320kbps availability flag — false keeps the 96k URL */
   has320?: boolean;
+  /** Catalog language (hindi/punjabi/english/…) — powers language affinity */
+  language?: string;
+  /** Release year — powers era affinity */
+  year?: number;
+  /** Attached by MINDBEAT surfaces — the truthful explanation line */
+  reason?: string;
+  reasonCode?: string;
+  /** True when this serve came from an exploration slot (§8.4) */
+  exploration?: boolean;
   /** Local downloaded file URI (documentDirectory path) */
   localUri?: string;
   /** Provider explicit flag (kept for search badges; filtered off home) */

@@ -15,6 +15,7 @@ import {
 } from '../storage/store';
 import { downloadTrack, isDownloaded } from '../storage/downloads';
 import { usePlayer } from '../player/PlayerProvider';
+import { mindbeat } from '../ai/mindbeat';
 import { useToast } from '../components/Toast';
 import { PressableScale } from '../components/PressableScale';
 import { colors, fonts, radius, spacing } from '../theme';
@@ -84,7 +85,11 @@ export function TrackMenu({
       message: ok ? `Downloaded ${track.title}` : `Couldn't download ${track.title}`,
       icon: ok ? 'checkmark-circle' : 'alert-circle-outline',
     });
-    if (ok) setDownloaded(true);
+    if (ok) {
+      setDownloaded(true);
+      // Ownership intent — +2.5 evidence (§5.2).
+      void mindbeat.ledgerApi?.downloaded({ id: track.id, artist: track.artist });
+    }
   }, [track, toast]);
 
   if (!track) return null;
@@ -115,6 +120,40 @@ export function TrackMenu({
                   }}
                 />
               ))}
+              {/* MINDBEAT taste corrections (§6.6) — every action changes
+                  the very next recommendation the engine makes. */}
+              <Action
+                icon="close-circle-outline"
+                label="Not for me"
+                dim
+                onPress={() => {
+                  void mindbeat.notForMe(track, 'user_queue');
+                  toast.show({
+                    message: `Got it — fewer songs like ${track.title}`,
+                    icon: 'remove-circle-outline',
+                  });
+                  onClose();
+                }}
+              />
+              <Action
+                icon="trending-up-outline"
+                label={`Boost ${track.artist.split(' feat')[0]}`}
+                onPress={() => {
+                  void mindbeat.boostArtist(track.artist);
+                  toast.show({ message: `${track.artist.split(' feat')[0]} will show up more`, icon: 'trending-up' });
+                  onClose();
+                }}
+              />
+              <Action
+                icon="volume-mute-outline"
+                label={`Mute ${track.artist.split(' feat')[0]}`}
+                dim
+                onPress={() => {
+                  void mindbeat.muteArtist(track.artist);
+                  toast.show({ message: `${track.artist.split(' feat')[0]} won't be recommended`, icon: 'volume-mute' });
+                  onClose();
+                }}
+              />
               <Action
                 icon="play-forward-outline"
                 label="Play next"

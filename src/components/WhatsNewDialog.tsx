@@ -11,13 +11,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { PressableScale } from './PressableScale';
 import { colors, fonts, radius, spacing } from '../theme';
 
-const SEEN_KEY = 'tsf.whatsNew.v2_5_0';
+const SEEN_KEY = 'tsf.whatsNew.v3_0_0';
 
 const CHANGES = [
-  'Fresh Spotify-accurate design: green active chips, avatar header',
-  'Home shortcut grid — 8 tiles like the real app',
-  'New Premium tab + Library grid view',
-  'Mini player now shows “Title • Artist” on one line',
+  'MINDBEAT AI engine: the app now learns from every play, skip and like',
+  'Smart Shuffle gets queue healing — skip a pick, it instantly adapts',
+  'TSF AI v2: understands Hinglish, negations (“no remixes”) and energy arcs',
+  'New: Now Sound (music for your exact hour), On the Rise, Taste DNA',
+  'Your Sound: 30-second-rule streams, listening clock, day streaks',
 ];
 
 export function WhatsNewDialog() {
@@ -51,7 +52,7 @@ export function WhatsNewDialog() {
             <Ionicons name="sparkles" size={20} color={colors.textOnGreen} />
           </View>
           <Text style={styles.title}>What&apos;s new</Text>
-          <Text style={styles.version}>TSF Music 2.5.0</Text>
+          <Text style={styles.version}>TSF Music 3.0.0 · MINDBEAT</Text>
           <View style={styles.list}>
             {CHANGES.map((c) => (
               <View key={c} style={styles.row}>

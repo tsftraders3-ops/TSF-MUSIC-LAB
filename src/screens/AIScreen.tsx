@@ -27,6 +27,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { Track } from '../types';
 import { generatePlaylist, PROMPT_IDEAS, type GeneratedPlaylist } from '../ai/generator';
+import { generatePlaylistV2, parseIntent, type GeneratedPlaylistV2 } from '../ai/surfaces/playlist';
+import { mindbeat } from '../ai/mindbeat';
+import { hash32 } from '../ai/core/time';
+import { searchSaavnClean } from '../api/saavn';
 import { createPlaylist } from '../storage/store';
 import { usePlayer } from '../player/PlayerProvider';
 import { useToast } from '../components/Toast';
@@ -35,13 +39,15 @@ import { PressableScale } from '../components/PressableScale';
 import { colors, fonts, radius, spacing } from '../theme';
 import type { RootStackParamList } from './navigation';
 
-type Phase = 'idle' | 'understanding' | 'searching' | 'scoring' | 'done' | 'error';
+type Phase = 'idle' | 'understanding' | 'searching' | 'scoring' | 'polishing' | 'narrating' | 'done' | 'error';
 
 const PHASE_LABEL: Record<Phase, string> = {
   idle: '',
   understanding: 'Understanding your vibe',
   searching: 'Digging through the catalog',
   scoring: 'Scoring & ordering tracks',
+  polishing: 'Sequencing the energy arc',
+  narrating: 'Naming the mix',
   done: 'Playlist ready',
   error: 'Something went wrong',
 };
@@ -55,7 +61,8 @@ export function AIScreen() {
   const [prompt, setPrompt] = useState('');
   const [phase, setPhase] = useState<Phase>('idle');
   const [detail, setDetail] = useState('');
-  const [result, setResult] = useState<GeneratedPlaylist | null>(null);
+  const [result, setResult] = useState<GeneratedPlaylistV2 | null>(null);
+  const [variant, setVariant] = useState(0);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
@@ -70,50 +77,80 @@ export function AIScreen() {
   }, [phase, orbit]);
   const spin = orbit.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
-  const run = useCallback(async (text: string) => {
-    const p = text.trim();
-    if (!p) return;
-    Keyboard.dismiss();
-    setResult(null);
-    setPhase('understanding');
-    setDetail('Reading your vibe…');
-    try {
-      const generated = await generatePlaylist(p, (stage) => {
-        setPhase(stage.phase === 'done' ? 'done' : stage.phase);
-        setDetail(stage.detail);
-      });
-      if (!generated.tracks.length) {
+  const run = useCallback(
+    async (text: string, v = 0) => {
+      const p = text.trim();
+      if (!p) return;
+      Keyboard.dismiss();
+      setResult(null);
+      setPhase('understanding');
+      setDetail('Reading your vibe…');
+      try {
+        // MINDBEAT five-stage pipeline (§9.3): Understand → Hunt → Curate
+        // → Polish → Narrate. All but Hunt are local (instant); Hunt is
+        // parallel search — the only latency source.
+        const generated = await generatePlaylistV2(
+          { search: (q, limit) => searchSaavnClean(q, limit) },
+          p,
+          (stage) => {
+            setPhase(stage.phase === 'done' ? 'done' : (stage.phase === 'hunting' ? 'searching' : stage.phase === 'curating' ? 'scoring' : stage.phase));
+            setDetail(stage.detail);
+          },
+          v,
+        );
+        let final: GeneratedPlaylistV2 = generated;
+        // Fallback ladder (§10.4): v2 thin → v2.1 engine takes over.
+        if (final.tracks.length < 8) {
+          const legacy = await generatePlaylist(p);
+          if (legacy.tracks.length > final.tracks.length) {
+            final = {
+              name: legacy.name,
+              description: legacy.description,
+              tracks: legacy.tracks,
+              intent: parseIntent(p),
+              hunts: [],
+            };
+          }
+        }
+        if (!final.tracks.length) {
+          setPhase('error');
+          setDetail('No songs matched — try different words');
+          return;
+        }
+        if (v > 0) {
+          void mindbeat.ledgerApi?.aiRegenerated(`h${hash32(p)}`, v);
+        }
+        setResult(final);
+        setVariant(v);
+        setPhase('done');
+      } catch {
         setPhase('error');
-        setDetail('No songs matched — try different words');
-        return;
+        setDetail('Network hiccup — try again');
       }
-      setResult(generated);
-      setPhase('done');
-    } catch {
-      setPhase('error');
-      setDetail('Network hiccup — try again');
-    }
-  }, []);
+    },
+    [],
+  );
 
   const save = useCallback(async () => {
     if (!result) return;
     setSaving(true);
     try {
-      await createPlaylist(result.name, result.tracks);
+      const pl = await createPlaylist(result.name, result.tracks);
       toast.show({ message: `Saved “${result.name}” to Your Library`, icon: 'checkmark-circle' });
+      void mindbeat.ledgerApi?.aiPlaylistSaved(pl.id, `h${hash32(prompt)}`);
     } finally {
       setSaving(false);
     }
-  }, [result, toast]);
+  }, [result, toast, prompt]);
 
   const playAll = (shuffle: boolean) => {
     if (!result?.tracks.length) return;
     const list = shuffle ? [...result.tracks].sort(() => Math.random() - 0.5) : result.tracks;
-    playQueue(list, 0);
+    playQueue(list, 0, 'ai_playlist');
     nav.navigate('Player');
   };
 
-  const busy = phase === 'understanding' || phase === 'searching' || phase === 'scoring';
+  const busy = phase === 'understanding' || phase === 'searching' || phase === 'scoring' || phase === 'polishing' || phase === 'narrating';
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -201,6 +238,29 @@ export function AIScreen() {
                 <Text style={styles.resultDesc} numberOfLines={2}>
                   {result.description}
                 </Text>
+                {/* Detected intent chips — transparency about what the AI
+                    understood, incl. negations (§9.3 S1). */}
+                {(() => {
+                  const i = result.intent;
+                  const chips = [
+                    ...i.moods.slice(0, 2),
+                    ...i.genres.slice(0, 1),
+                    ...i.languages.slice(0, 1),
+                    ...i.eras.slice(0, 1),
+                    ...i.activities.slice(0, 1),
+                    ...i.negations.slice(0, 2).map((n) => `no ${n}`),
+                  ].filter(Boolean);
+                  if (!chips.length) return null;
+                  return (
+                    <View style={styles.intentRow}>
+                      {chips.map((c) => (
+                        <View key={c} style={styles.intentChip}>
+                          <Text style={styles.intentChipText}>{c}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  );
+                })()}
                 <View style={styles.resultActions}>
                   <PressableScale onPress={() => playAll(false)} haptic style={styles.playBtn}>
                     <Ionicons name="play" size={19} color={colors.accentDeep} />
@@ -217,7 +277,7 @@ export function AIScreen() {
                       <Ionicons name="add" size={22} color={colors.text} />
                     )}
                   </PressableScale>
-                  <PressableScale onPress={() => run(prompt)} haptic style={styles.iconBtn}>
+                  <PressableScale onPress={() => run(prompt, variant + 1)} haptic style={styles.iconBtn}>
                     <Ionicons name="refresh" size={20} color={colors.text} />
                   </PressableScale>
                 </View>
@@ -231,7 +291,7 @@ export function AIScreen() {
             <TrackRow
               track={item}
               onPress={() => {
-                playQueue(result.tracks, index);
+                playQueue(result.tracks, index, 'ai_playlist');
                 nav.navigate('Player');
               }}
             />
@@ -358,6 +418,16 @@ const styles = StyleSheet.create({
     lineHeight: 28,
   },
   resultDesc: { color: colors.textDim, fontSize: 13, fontFamily: fonts.regular, lineHeight: 17 },
+  intentRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: spacing.sm },
+  intentChip: {
+    backgroundColor: colors.surface,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  intentChipText: { color: colors.textDim, fontSize: 11, fontFamily: fonts.medium },
   resultActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
   playBtn: {
     flexDirection: 'row',

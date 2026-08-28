@@ -7,6 +7,7 @@ export type RootStackParamList = {
   Collection: { collection: Collection; tracks?: Track[] };
   Playlist: { playlistId: string };
   Stats: undefined;
+  Taste: undefined;
   AI: undefined;
 };
 

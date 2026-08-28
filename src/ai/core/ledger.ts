@@ -1,0 +1,541 @@
+/**
+ * L1 — THE EVENT LEDGER (§5, "Signal Telescope").
+ *
+ * Every meaningful interaction becomes graded evidence:
+ *   • append-only raw events (90-day retention, bounded ≤20k by compaction)
+ *   • ListenRecords — the graded outcomes (skip taxonomy §5.2)
+ *   • session records (30-min gap rule, §5.3)
+ *   • crash-safe: 10s heartbeats let the next boot reconstruct a partial
+ *     listen ("killing the app mid-track loses zero evidence" — §5.5).
+ *
+ * Write protocol (§5.4): a single serialized write chain; heartbeats
+ * accumulate in memory and flush every HEARTBEAT_SECONDS so the amortized
+ * write cost stays ≪10 ms.
+ */
+
+import {
+  HEARTBEAT_SECONDS,
+  RETENTION,
+  SESSION,
+  SKIP_THRESHOLDS,
+} from './constants';
+import type { LedgerStore } from './store';
+import type { LedgerEvent, ListenRecord, ReasonCode, SessionRecord, SourceSurface } from './types';
+import { blockOf, dayKindOf } from './time';
+
+export interface TrackStartMeta {
+  trackId: string;
+  artist: string;
+  artistId?: string;
+  title?: string;
+  language?: string;
+  genre?: string;
+  year?: number;
+  durationMs: number;
+  energy: number;
+  valence: number;
+  wasRecommended: boolean;
+  reasonCode?: ReasonCode;
+  explorationSlot?: boolean;
+}
+
+let idCounter = 0;
+function nextId(ts: number): string {
+  idCounter = (idCounter + 1) % 0xffff;
+  return `${ts.toString(36)}-${idCounter.toString(36)}`;
+}
+
+export class EventLedger {
+  private store: LedgerStore;
+  private now: () => number;
+  private writeChain: Promise<unknown> = Promise.resolve();
+
+  private sessionId = '';
+  private sessionStartTs = 0;
+  private sessionTrackCount = 0;
+  private sessionListenMs = 0;
+  private lastActivityTs = 0;
+  private lastCompactionDay = '';
+  /** Single-owner instrumentation state: last started track + ts. */
+  private lastStartedId = '';
+  private lastStartedTs = 0;
+  /** trackId → ts of recent COMPLETED listens (cheap REPLAY checks). */
+  private recentCompletions = new Map<string, number>();
+  private recoveredStartIds = new Set<string>();
+
+  /** The in-flight listen (TRACK_START … finalize). */
+  private current: (TrackStartMeta & {
+    startTs: number;
+    surface: SourceSurface;
+    listenedMs: number;
+    lastFlushMs: number;
+    pendingSkip: boolean;
+  }) | null = null;
+
+  private eventsSinceStart = 0;
+
+  constructor(store: LedgerStore, now: () => number = Date.now) {
+    this.store = store;
+    this.now = now;
+  }
+
+  // ── Boot ───────────────────────────────────────────────────────────────
+
+  /** Open-time recovery + compaction (first open of day). Idempotent. */
+  async init(): Promise<void> {
+    await this.recoverPartialListen();
+    await this.maybeCompact();
+    // Hydrate the REPLAY cache from recent completions (cross-boot replays).
+    try {
+      const recent = await this.store.getlistens(this.now() - SKIP_THRESHOLDS.replayWindowDays * 86400_000);
+      for (const l of recent) {
+        if (l.grade === 'COMPLETED' || l.grade === 'REPLAY') {
+          this.recentCompletions.set(l.trackId, l.startedTs);
+        }
+      }
+    } catch {
+      /* cache is an optimization */
+    }
+  }
+
+  /**
+   * Crash recovery (§5.5): find the last TRACK_START whose track never got
+   * a TRACK_SKIP/TRACK_END, rebuild the partial listen from heartbeats.
+   */
+  private async recoverPartialListen(): Promise<void> {
+    try {
+      const events = await this.store.getEvents();
+      const lastStartIdx = findLastUnclosedStart(events);
+      if (lastStartIdx == null) return;
+      const start = events[lastStartIdx];
+      // Idempotence: recovery must append the partial listen EXACTLY ONCE.
+      // Closing the start with a synthetic TRACK_END means the next boot's
+      // findLastUnclosedStart skips it.
+      if (this.recoveredStartIds.has(start.id)) return;
+      this.recoveredStartIds.add(start.id);
+      const meta = start.payload as Record<string, unknown>;
+      let listenedMs = 0;
+      for (let i = lastStartIdx + 1; i < events.length; i++) {
+        const e = events[i];
+        if (e.type === 'TRACK_HEARTBEAT' && e.trackId === start.trackId) {
+          listenedMs = Number(e.payload.elapsedMs ?? 0);
+        }
+        if (e.type === 'TRACK_START') break; // a new track started — the old one is done
+      }
+      const durationMs = Number(meta.durationMs ?? 0) || 1;
+      if (listenedMs <= 0) {
+        // Still close the start (no listen worth recording <10s).
+        await this.store.appendEvents([this.syntheticClose(start)]);
+        return;
+      }
+      const ratio = Math.min(1, listenedMs / durationMs);
+      const record: ListenRecord = {
+        trackId: start.trackId ?? '',
+        artistId: (meta.artistId as string) ?? undefined,
+        artist: (meta.artist as string) ?? 'Unknown',
+        title: meta.title as string | undefined,
+        language: meta.language as string | undefined,
+        genre: meta.genre as string | undefined,
+        year: meta.year as number | undefined,
+        energy: Number(meta.energy ?? 0.5),
+        valence: Number(meta.valence ?? 0.5),
+        sessionId: start.sessionId,
+        surface: (start.surface ?? 'user_queue') as SourceSurface,
+        startedTs: start.ts,
+        listenedMs,
+        durationMs,
+        completionRatio: ratio,
+        grade: gradeFor(false, listenedMs, durationMs, ratio),
+        skipBucket: skipBucketOf(ratio),
+        wasRecommended: Boolean(meta.wasRecommended),
+        reasonCode: meta.reasonCode as ListenRecord['reasonCode'] | undefined,
+        explorationSlot: Boolean(meta.explorationSlot),
+      };
+      await this.store.appendListen(record);
+      // Close the reconstructed start so the next boot never re-appends it.
+      await this.store.appendEvents([this.syntheticClose(start)]);
+    } catch {
+      /* recovery is best-effort — never block boot */
+    }
+  }
+
+  /** A closing event for crash-recovered TRACK_STARTs (idempotence). */
+  private syntheticClose(start: LedgerEvent): LedgerEvent {
+    return {
+      id: `${start.id}-rc`,
+      ts: start.ts + 1,
+      type: 'TRACK_END',
+      sessionId: start.sessionId,
+      trackId: start.trackId,
+      payload: { recovered: true },
+    };
+  }
+
+  /** First-open-of-day compaction + hard cap (§5.4). */
+  async maybeCompact(): Promise<void> {
+    const today = new Date(this.now()).toDateString();
+    if (today === this.lastCompactionDay) return;
+    this.lastCompactionDay = today;
+    try {
+      const now = this.now();
+      await this.store.deleteEventsBefore(now - RETENTION.rawEventDays * 86400_000);
+      const count = await this.store.countEvents();
+      if (count > RETENTION.maxRawEvents) {
+        // Hard cap: keep the newest (max - compactBatch) events.
+        const events = await this.store.getEvents();
+        const keepFrom = events[Math.max(0, events.length - (RETENTION.maxRawEvents - RETENTION.compactBatch))];
+        if (keepFrom) await this.store.deleteEventsBefore(keepFrom.ts);
+      }
+    } catch {
+      /* compaction failures are non-fatal */
+    }
+  }
+
+  // ── Sessions (§5.3) ────────────────────────────────────────────────────
+
+  /** App became active. Starts a session after a ≥30 min gap. */
+  async onAppActive(): Promise<string> {
+    const now = this.now();
+    const gapMin = (now - this.lastActivityTs) / 60000;
+    if (!this.sessionId || gapMin >= SESSION.gapMinutes || this.lastActivityTs === 0) {
+      if (this.sessionId) await this.closeSession(now);
+      this.sessionId = `s-${nextId(now)}`;
+      this.sessionStartTs = now;
+      this.sessionTrackCount = 0;
+      this.sessionListenMs = 0;
+      await this.emit('SESSION_START', {});
+    }
+    this.lastActivityTs = now;
+    return this.sessionId;
+  }
+
+  /** App backgrounded: checkpoint the session (app-kill durability) but
+   *  do NOT finalize the in-flight listen — music typically keeps playing
+   *  in the background and the service keeps sending heartbeats. */
+  async onAppBackground(): Promise<void> {
+    this.lastActivityTs = this.now();
+    await this.emit('APP_BACKGROUND', {
+      sessionDurationMs: this.now() - this.sessionStartTs,
+    });
+    if (this.sessionId) {
+      const inFlightMs = this.current?.listenedMs ?? 0;
+      await this.store.upsertSession({
+        id: this.sessionId,
+        startTs: this.sessionStartTs,
+        daypart: blockOf(this.sessionStartTs),
+        dayKind: dayKindOf(this.sessionStartTs),
+        trackCount: this.sessionTrackCount,
+        totalListenMs: this.sessionListenMs + inFlightMs,
+      });
+    }
+  }
+
+  private async closeSession(endTs: number): Promise<void> {
+    if (!this.sessionId) return;
+    const record: SessionRecord = {
+      id: this.sessionId,
+      startTs: this.sessionStartTs,
+      endTs,
+      daypart: blockOf(this.sessionStartTs),
+      dayKind: dayKindOf(this.sessionStartTs),
+      trackCount: this.sessionTrackCount,
+      totalListenMs: this.sessionListenMs,
+    };
+    await this.store.upsertSession(record);
+    this.sessionId = '';
+  }
+
+  // ── Track lifecycle ────────────────────────────────────────────────────
+
+  async trackStarted(meta: TrackStartMeta, surface: SourceSurface): Promise<void> {
+    // SINGLE-OWNER GUARD: two instrumenters (UI effect + background service
+    // tick) may both report the same transition. Re-starting the identical
+    // in-flight track is a no-op — never a phantom finalize+restart.
+    if (this.current && this.current.trackId === meta.trackId && this.current.listenedMs < 15000) {
+      this.current.surface = surface;
+      return;
+    }
+    if (this.lastStartedId === meta.trackId && this.current == null && this.now() - this.lastStartedTs < 2000) {
+      return; // duplicate start event for an already-finalized track
+    }
+    // A new TRACK_START implicitly finalizes any in-flight listen as a skip
+    // (the user jumped away) unless it was already finalized.
+    if (this.current) await this.finalizeTrack(true, 'jump');
+    const now = this.now();
+    this.lastStartedId = meta.trackId;
+    this.lastStartedTs = now;
+    this.current = {
+      ...meta,
+      startTs: now,
+      surface,
+      listenedMs: 0,
+      lastFlushMs: 0,
+      pendingSkip: false,
+    };
+    this.sessionTrackCount += 1;
+    this.lastActivityTs = now;
+    if (this.sessionId) {
+      await this.emit(
+        'TRACK_START',
+        {
+          artistId: meta.artistId,
+          durationMs: meta.durationMs,
+          energy: meta.energy,
+          valence: meta.valence,
+          language: meta.language,
+          genre: meta.genre,
+          title: meta.title,
+          wasRecommended: meta.wasRecommended,
+          reasonCode: meta.reasonCode,
+          explorationSlot: meta.explorationSlot ?? false,
+          queuePosition: this.sessionTrackCount,
+        },
+        meta.trackId,
+        meta.artistId,
+        surface,
+      );
+    }
+  }
+
+  /**
+   * Progress tick (1 s). Accumulates listened time; flushes a heartbeat
+   * event every HEARTBEAT_SECONDS of accumulated listen.
+   */
+  async heartbeat(elapsedMs: number): Promise<void> {
+    if (!this.current) return;
+    this.current.listenedMs = Math.max(this.current.listenedMs, Math.min(elapsedMs, this.current.durationMs || elapsedMs));
+    const sinceFlush = this.current.listenedMs - this.current.lastFlushMs;
+    if (sinceFlush >= HEARTBEAT_SECONDS * 1000) {
+      this.current.lastFlushMs = this.current.listenedMs;
+      await this.emit(
+        'TRACK_HEARTBEAT',
+        { elapsedMs: this.current.listenedMs },
+        this.current.trackId,
+      );
+    }
+    this.lastActivityTs = this.now();
+  }
+
+  /** User scrubbed. Backward seeks are replay-evidence (§5.1). */
+  async seek(fromMs: number, toMs: number): Promise<void> {
+    if (!this.current) return;
+    await this.emit('TRACK_SEEK', { fromMs, toMs }, this.current.trackId);
+  }
+
+  /** Mark the in-flight listen as user-initiated-skip (pressed Next). */
+  markPendingSkip(): void {
+    if (this.current) this.current.pendingSkip = true;
+  }
+
+  /**
+   * Grade + persist the in-flight listen (§5.2). Called on skip, natural
+   * end, track jump, or session close. Idempotent per track. Returns the
+   * persisted record (or null) so callers can feed the SessionBrain
+   * without re-reading storage.
+   */
+  async finalizeTrack(
+    userInitiated: boolean,
+    cause: 'skip' | 'end' | 'jump' | 'background' = 'end',
+  ): Promise<ListenRecord | null> {
+    const cur = this.current;
+    if (!cur) return null;
+    this.current = null;
+    // A marked pending skip (RemoteNext / next button) always grades as
+    // user-initiated even when the caller's flag is stale.
+    const skipped = userInitiated || cur.pendingSkip || cause === 'jump';
+    const now = this.now();
+    const durationMs = cur.durationMs || Math.max(cur.listenedMs, 1);
+    const ratio = Math.min(1, cur.listenedMs / durationMs);
+    let grade = gradeFor(skipped, cur.listenedMs, durationMs, ratio);
+
+    // REPLAY: completed/late + same track finalized COMPLETED again within 7d.
+    if (grade === 'COMPLETED') {
+      const priorTs = this.recentCompletions.get(cur.trackId);
+      if (priorTs != null && now - priorTs <= SKIP_THRESHOLDS.replayWindowDays * 86400_000) {
+        grade = 'REPLAY';
+      }
+    }
+
+    const record: ListenRecord = {
+      trackId: cur.trackId,
+      artistId: cur.artistId,
+      artist: cur.artist,
+      title: cur.title,
+      language: cur.language,
+      genre: cur.genre,
+      year: cur.year,
+      energy: cur.energy,
+      valence: cur.valence,
+      sessionId: this.sessionId,
+      surface: cur.surface,
+      startedTs: cur.startTs,
+      listenedMs: cur.listenedMs,
+      durationMs,
+      completionRatio: ratio,
+      grade,
+      skipBucket: skipBucketOf(ratio),
+      wasRecommended: cur.wasRecommended,
+      reasonCode: cur.reasonCode,
+      explorationSlot: cur.explorationSlot ?? false,
+    };
+    this.sessionListenMs += cur.listenedMs;
+
+    await this.store.appendListen(record);
+    // Remember recent completions in-memory for cheap REPLAY detection
+    // (the 7-day table read was a per-finalize hot-path cost).
+    if (grade === 'COMPLETED' || grade === 'REPLAY') {
+      this.recentCompletions.set(record.trackId, now);
+      if (this.recentCompletions.size > 400) {
+        const oldest = [...this.recentCompletions.entries()].sort((a, b) => a[1] - b[1]).slice(0, 100);
+        for (const [k] of oldest) this.recentCompletions.delete(k);
+      }
+    }
+    await this.emit(skipped ? 'TRACK_SKIP' : 'TRACK_END', {
+      elapsedMs: cur.listenedMs,
+      completionRatio: ratio,
+      grade,
+      cause,
+    }, cur.trackId);
+    return record;
+  }
+
+  // ── Discrete signals ───────────────────────────────────────────────────
+
+  async liked(track: { id: string; artist: string; artistId?: string }, surface: SourceSurface): Promise<void> {
+    await this.emit('TRACK_LIKE', { artist: track.artist }, track.id, track.artistId, surface);
+  }
+
+  async unliked(track: { id: string; artist: string }): Promise<void> {
+    await this.emit('TRACK_UNLIKE', { artist: track.artist }, track.id);
+  }
+
+  async downloaded(track: { id: string; artist: string }): Promise<void> {
+    await this.emit('TRACK_DOWNLOAD', { artist: track.artist }, track.id);
+  }
+
+  async queueAdded(track: { id: string; artist: string }, targetSurface: SourceSurface): Promise<void> {
+    await this.emit('QUEUE_ADD_MANUAL', { targetSurface, artist: track.artist }, track.id);
+  }
+
+  async queueRemoved(trackId: string, wasRecommended: boolean): Promise<void> {
+    await this.emit('QUEUE_REMOVE', { wasRecommended }, trackId);
+  }
+
+  /** A recommended track entered the visible queue (§5.1 — survivorship-safe metrics). */
+  async recExposed(trackId: string, surface: SourceSurface, rankInPool: number, exploration: boolean): Promise<void> {
+    await this.emit('REC_EXPOSURE', { rankInPool, exploration }, trackId, undefined, surface);
+  }
+
+  async searchQueried(query: string, resultCount: number): Promise<void> {
+    await this.emit('SEARCH_QUERY', { query, resultCount });
+  }
+
+  async searchClicked(trackId: string, rankInResults: number): Promise<void> {
+    await this.emit('SEARCH_CLICK', { rankInResults }, trackId);
+  }
+
+  async aiPlaylistSaved(playlistId: string, promptHash: string): Promise<void> {
+    await this.emit('PLAYLIST_SAVE_AI', { promptHash }, playlistId);
+  }
+
+  async aiRegenerated(promptHash: string, variantIndex: number): Promise<void> {
+    await this.emit('AI_REGENERATE', { promptHash, variantIndex });
+  }
+
+  async notForMe(trackId: string, surface: SourceSurface, reasonCode?: string): Promise<void> {
+    await this.emit('NOT_FOR_ME', { surface, reasonCode }, trackId);
+  }
+
+  async stationEnded(tracksServed: number, avgListenRatio: number): Promise<void> {
+    await this.emit('STATION_ENDED', { tracksServed, avgListenRatio });
+  }
+
+  // ── Read paths ─────────────────────────────────────────────────────────
+
+  async getListens(days = 180): Promise<ListenRecord[]> {
+    return this.store.getlistens(this.now() - days * 86400_000);
+  }
+
+  async getSessions(days = 180): Promise<SessionRecord[]> {
+    return this.store.getSessions(this.now() - days * 86400_000);
+  }
+
+  async getEventsSince(sinceTs: number): Promise<LedgerEvent[]> {
+    return this.store.getEvents(sinceTs);
+  }
+
+  get activeSessionId(): string {
+    return this.sessionId;
+  }
+
+  get inFlightTrackId(): string | null {
+    return this.current?.trackId ?? null;
+  }
+
+  get store_(): LedgerStore {
+    return this.store;
+  }
+
+  // ── Write chain ────────────────────────────────────────────────────────
+
+  private emit(
+    type: LedgerEvent['type'],
+    payload: Record<string, unknown>,
+    trackId?: string,
+    artistId?: string,
+    surface?: SourceSurface,
+  ): Promise<void> {
+    const run = this.writeChain.then(async () => {
+      const ts = this.now();
+      const event: LedgerEvent = {
+        id: nextId(ts),
+        ts,
+        type,
+        sessionId: this.sessionId || 'boot',
+        trackId,
+        artistId,
+        surface,
+        payload,
+      };
+      this.eventsSinceStart++;
+      await this.store.appendEvents([event]);
+    });
+    this.writeChain = run.catch(() => undefined);
+    return run;
+  }
+}
+
+// ── Grading helpers (pure — unit-tested) ────────────────────────────────
+
+export function gradeFor(
+  _userInitiated: boolean,
+  listenedMs: number,
+  _durationMs: number,
+  ratio: number,
+): ListenRecord['grade'] {
+  if (ratio >= SKIP_THRESHOLDS.completedRatio) return 'COMPLETED';
+  const seconds = listenedMs / 1000;
+  if (seconds < SKIP_THRESHOLDS.instantSeconds) return 'INSTANT_REJECT';
+  if (seconds < SKIP_THRESHOLDS.earlySeconds) return 'EARLY_SKIP';
+  if (ratio < SKIP_THRESHOLDS.lateRatio) return 'MID_SKIP';
+  return 'LATE_SKIP';
+}
+
+/** Decile 1..10 where the listen stopped (skip-position histogram §5.2). */
+export function skipBucketOf(ratio: number): number {
+  return Math.max(1, Math.min(10, Math.ceil(ratio * 10)));
+}
+
+/** Index of the last TRACK_START that never got a closing event. */
+function findLastUnclosedStart(events: LedgerEvent[]): number | null {
+  let lastStart: number | null = null;
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    if (e.type === 'TRACK_START') lastStart = i;
+    else if ((e.type === 'TRACK_SKIP' || e.type === 'TRACK_END') && lastStart != null) {
+      const closedId = events[lastStart].trackId;
+      if (closedId === e.trackId) lastStart = null;
+    }
+  }
+  return lastStart;
+}

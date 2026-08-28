@@ -152,6 +152,16 @@ export function TrackRow({
             {sub}
           </Text>
         </View>
+        {/* MINDBEAT truthful explanation (§8.5) — every recommended
+            track carries an honest reason line, never social proof. */}
+        {track.isRecommended && track.reason ? (
+          <View style={styles.reasonRow}>
+            <Ionicons name="sparkles" size={11} color={colors.aiEnd} />
+            <Text style={styles.reasonText} numberOfLines={1}>
+              {track.reason}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       {right ??
@@ -198,6 +208,13 @@ const styles = StyleSheet.create({
     color: colors.textDim,
     fontSize: 13,
     fontFamily: fonts.regular,
+    flexShrink: 1,
+  },
+  reasonRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 1 },
+  reasonText: {
+    color: colors.aiEnd,
+    fontSize: 11.5,
+    fontFamily: fonts.medium,
     flexShrink: 1,
   },
   previewTag: {

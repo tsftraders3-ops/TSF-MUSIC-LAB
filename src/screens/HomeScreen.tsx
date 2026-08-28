@@ -33,6 +33,9 @@ import {
   getTrending,
 } from '../api/saavn';
 import { getBecauseYouListened, getDailyMixes } from '../ai/engine';
+import { mindbeat } from '../ai/mindbeat';
+import type { NowSoundCard } from '../ai/surfaces/daylist';
+import type { OnTheRiseCard } from '../ai/surfaces/ontherise';
 import { getChartsCache, getFavorites, getRecents, setChartsCache } from '../storage/store';
 import { usePlayer } from '../player/PlayerProvider';
 import { QuickTile, Shelf, ShelfCard } from '../components/Shelf';
@@ -55,6 +58,8 @@ export function HomeScreen() {
   const [charts, setCharts] = useState<Collection[]>([]);
   const [recents, setRecents] = useState<Track[]>([]);
   const [favorites, setFavorites] = useState<Track[]>([]);
+  const [nowSound, setNowSound] = useState<NowSoundCard | null>(null);
+  const [onTheRise, setOnTheRise] = useState<OnTheRiseCard | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [offline, setOffline] = useState(false);
 
@@ -89,12 +94,17 @@ export function HomeScreen() {
     }
 
     // AI surfaces first — they personalize the whole screen.
-    getDailyMixes()
-      .then(setMixes)
-      .catch(() => setMixes([]));
+    // MINDBEAT surfaces (Mixes v2 / Now Sound / On the Rise) with the v2.1
+    // engine as the graceful fallback (ladder §10.4).
+    mindbeat
+      .dailyMixes()
+      .then((v2) => (v2.length ? setMixes(v2) : getDailyMixes().then(setMixes)))
+      .catch(() => getDailyMixes().then(setMixes).catch(() => setMixes([])));
     getBecauseYouListened(2)
       .then(setBecause)
       .catch(() => setBecause([]));
+    mindbeat.nowSound().then(setNowSound).catch(() => undefined);
+    mindbeat.onTheRise().then(setOnTheRise).catch(() => undefined);
 
     try {
       const [trend, chartList] = await Promise.all([
@@ -255,6 +265,23 @@ export function HomeScreen() {
           <ShelfSkeleton />
         ) : (
           <>
+            {/* ── Now Sound (daylist §9.4) — the time-aware shelf ─────── */}
+            {nowSound && nowSound.tracks.length > 0 && showAI ? (
+              <Shelf title="Now Sound">
+                <ShelfCard
+                  title={nowSound.title}
+                  subtitle={nowSound.subtitle}
+                  artwork={nowSound.tracks[0]?.artwork ?? ''}
+                  seed={nowSound.id}
+                  size={150}
+                  onPress={() =>
+                    openTrackCollection(nowSound.title, nowSound.tracks as unknown as Track[])
+                  }
+                />
+                <AICreateCard onPress={() => nav.navigate('AI')} />
+              </Shelf>
+            ) : null}
+
             {/* ── Made for you (AI Daily Mixes) ───────────────────────── */}
             {hasMixes && showAI ? (
               <Shelf title="Made for you">
@@ -270,6 +297,25 @@ export function HomeScreen() {
                   />
                 ))}
                 <AICreateCard onPress={() => nav.navigate('AI')} />
+              </Shelf>
+            ) : null}
+
+            {/* ── On the Rise (§9.6) — the weekly discovery flagship ──── */}
+            {onTheRise && onTheRise.tracks.length > 2 && showAI ? (
+              <Shelf title="On the Rise">
+                {onTheRise.tracks.slice(0, 10).map((t) => (
+                  <ShelfCard
+                    key={t.id}
+                    title={t.title}
+                    subtitle={`via ${t.viaArtist}`}
+                    artwork={t.artwork}
+                    seed={`rise-${t.id}`}
+                    size={150}
+                    onPress={() =>
+                      openTrackCollection('On the Rise', onTheRise.tracks as unknown as Track[])
+                    }
+                  />
+                ))}
               </Shelf>
             ) : null}
 

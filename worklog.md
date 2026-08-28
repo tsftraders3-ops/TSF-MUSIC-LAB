@@ -273,3 +273,33 @@ Stage Summary:
 - The user should now: install v2.5.0 → see the "What's new" dialog on launch (proof of update) → check "Version 2.5.0" badge at the bottom of Library
 - v2.5.0 = the first release with UNDENIABLE visible changes: green+black chips, avatar-left header, 8-tile grid, 4th Premium tab, Library grid toggle, "Title • Artist" mini player
 - Reminder: user rotates GitHub token after session
+
+---
+Task ID: 10
+Agent: Super Z (main agent)
+Task: v3.0.0 "MINDBEAT" — complete end-to-end AI overhaul per the MINDBEAT v2.0 industrial plan (user: "improve the complete AI features end to end using the gauntlet loop… keep in mind speed and latency")
+
+Work Log:
+- Implemented the full six-layer intelligence architecture from the plan (18 new core files + 7 surfaces):
+  • L1 Event Ledger: 20 event types, graded Listen Score (INSTANT_REJECT/EARLY/MID/LATE/COMPLETED/REPLAY/HEART/HEART_CONTRADICT/DOWNLOAD/NOT_FOR_ME w/ blame splits), 30-min session reconstruction, 10s heartbeats w/ crash recovery, 90d retention + 20k cap compaction; expo-sqlite (WAL, transactions) native store + in-memory web/test store behind one interface
+  • L2 Taste Profile: per-tier half-life decay (heart 180d…era 120d), daypart matrix 5×2 w/ per-cell decay + valenceStd, Proxy Feature Space (110-artist cultural priors + genre priors + title rules + behavioral calibration), co-play graphs (5000 track/2000 artist caps, popularity-damped), label-propagation artist clusters, k-means mood cells, corrections (boost ×2 / mute / not-for-me), ε schedule w/ novelty accounting, boundary calibration after day 14
+  • L3 Session Brain: 12-track recency-tiered window, six-state vibe machine (WARMUP/FLOW/PEAK/WIND_DOWN/SKIP_STORM/EXPLORING), healing storm protocol, 100-serve/7d dedup
+  • L4 Decision Engine: 5-pool scoring (1.0/1.2/0.8/0.6/0.4), ε-greedy exploration (clamped, cross-lang ≤1-in-5), 8 truthful reason codes w/ hard truth conditions, determinism (seeded PRNG), hard 7-day freshness block, same-artist ≤2/6 cap on final order, storm consumption + vibe governance in decide()
+  • L5 Surfaces: Smart Shuffle v2 (vibe-lock + queue healing on rec skip), Radio v2 (multi-seed + drift-every-5 + dedup), Daily Mixes v2 (cluster crosses, 60/25/15, ≤30% yesterday), Now Sound daylist (microgenre naming), On the Rise (seed-of-seed chains w/ honest via-artist), AI Playlist v2 five-stage (Understand→Hunt→Curate→Polish→Narrate; Hinglish, negations first-class, activity energy arcs, artist cap 5, no-3-consecutive, 25/18 length), Vibe Search (typo fuzzy + "songs like X")
+  • L6 Trust: safety inherited + dodge-corpus tested; on-device privacy (no URLs/device ids in ledger — verifier-checked); kill switches (disable recs, reset model); export JSON
+- UI: Home Now Sound/On the Rise shelves, reason lines on rec rows, TrackMenu corrections (Not for me/Boost/Mute), Taste DNA screen (weights bars, daypart view, reason vocabulary, controls), Onboarding Pick-5, Your Sound v2 (30s rule, listening clock, streaks, skip rate), Search Keyword|Vibe toggle, AIScreen v2 (staged narration, intent chips incl. negations, variant regenerate), WhatsNew 3.0.0
+- Instrumentation: PlayerProvider (foreground owner) + service (background owner) single-owner rule; heartbeats via 1s ticks; appBackground checkpoints sessions without finalizing; kill-switch persists across restarts; snapshot boot + deferred rebuild (cold-start budget)
+- Replay harness: tests/ai (corpus builders: 4-community, 90-day 20k, 20-prompt, dodge) — 74/74 green
+- PERF (user's speed ask): rebuild 57ms ≪ 3s budget; decide() p95 3.9ms ≪ 150ms; writes 0.001ms amortized; affinity read 0.0002ms — all §10.3 budgets asserted in tests
+- GAUNTLET LOOP (3 rounds, fresh-context harsh critics each):
+  • R1: 4 parallel critics → 4× FAIL w/ verified P0s (dual-instrumentation phantom skips, recovery duplication, storm ignored by decide(), playlist pool starvation, negation over-capture, word-boundary misses, appBackground evidence loss…)
+  • R2 fixes: single-owner guards, synthetic recovery close, storm+vibe in decide(), planHunts width, first-token negation binding, hasWord(), cap on final order, session checkpoints, debounce, snapshot boot… + 12 regression tests
+  • R2 blind A/B (fair, same catalog): v2 WINS 17/20 vs v1 generator
+  • R2 verifier → NO-SHIP (background race + negation holes) → R3 fixes (AppState ownership mirror, loose-fallback negation, constituent-word blocking, lang synonyms, surface attribution, mood hunts, morphology)
+  • R3 verifier → SHIP. 74/74 green, TSC clean, export clean
+- Bundle: 3.19MB hbc (v2.5: 2.91MB → +280KB for the whole stack); markers MINDBEAT/Taste DNA/Not for me/BECAUSE_PLAYED/vibeSearch/On the Rise/listening clock all present; no webmocks leak
+
+Stage Summary:
+- v3.0.0 = MINDBEAT: every play/skip/like becomes graded evidence; the app reads the room, heals queues, explains every pick truthfully, and ships Wrapped-grade stats — 100% on-device, all §10.3 latency budgets met with 30-50× headroom
+- Gauntlet artifacts: scripts/ab2-blind.txt (17/20 v2 win), tests/ai/gauntlet-r2.test.ts (18 regression locks)
+- Reminder: user rotates GitHub token after session

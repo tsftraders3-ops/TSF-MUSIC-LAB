@@ -1,7 +1,15 @@
 /**
- * StatsScreen — "Your Sound": minutes listened, total plays, distinct
- * tracks, top artists (with play counts), top songs. Spotify-Wrapped
- * energy, computed entirely on-device from play counts.
+ * StatsScreen — "Your Sound" v2 (§9.7): Wrapped-grade counting from the
+ * Event Ledger.
+ *
+ *  • the 30-second rule (industry stream definition) — skips under 30s
+ *    don't count, exactly like the charts do
+ *  • listening clock (streams by hour — when this listener actually listens)
+ *  • day streak + skip-profile stats — proof the ledger exists
+ *  • entry to Taste DNA (the transparency screen §6.6)
+ *
+ * Falls back to v2.1 play-count stats when the ledger is young (ladder
+ * §10.4 — never emptier than before).
  */
 
 import React, { useEffect, useState } from 'react';
@@ -13,6 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ListeningStats } from '../types';
 import { getStats } from '../storage/store';
+import { mindbeat } from '../ai/mindbeat';
 import { usePlayer } from '../player/PlayerProvider';
 import { Artwork } from '../components/Artwork';
 import { PressableScale } from '../components/PressableScale';
@@ -21,6 +30,20 @@ import { useDynamicPalette } from '../theme/DynamicThemeProvider';
 import { withAlpha } from '../theme/dynamic';
 import type { RootStackParamList } from './navigation';
 
+type MindbeatStats = Awaited<ReturnType<typeof mindbeat.stats>>;
+
+interface Merged {
+  minutes: number;
+  streams: number;
+  songs: number;
+  topArtists: Array<{ artist: string; plays: number; artwork?: string }>;
+  topTracks: Array<{ track: import('../types').Track; plays: number }>;
+  byHour?: number[];
+  streakDays?: number;
+  skipRate?: number;
+  sessions?: number;
+}
+
 function fmtMinutes(mins: number): string {
   if (mins < 60) return `${mins} min`;
   const h = Math.floor(mins / 60);
@@ -28,15 +51,64 @@ function fmtMinutes(mins: number): string {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
+function ListeningClock({ byHour }: { byHour: number[] }) {
+  const max = Math.max(1, ...byHour);
+  return (
+    <View style={styles.clockWrap}>
+      <Text style={styles.clockTitle}>Listening clock</Text>
+      <Text style={styles.clockSub}>Streams by hour — 30s+ listens only</Text>
+      <View style={styles.clockRow}>
+        {byHour.map((n, h) => (
+          <View key={h} style={styles.clockCol}>
+            <View style={[styles.clockBarWrap]}>
+              <View
+                style={[
+                  styles.clockBar,
+                  { height: Math.max(3, (n / max) * 64), backgroundColor: h >= 22 || h < 5 ? colors.aiEnd : colors.accentBright },
+                ]}
+              />
+            </View>
+            {h % 6 === 0 ? <Text style={styles.clockLabel}>{h}</Text> : <View style={{ height: 12 }} />}
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 export function StatsScreen() {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { playQueue } = usePlayer();
   const palette = useDynamicPalette();
-  const [stats, setStats] = useState<ListeningStats | null>(null);
+  const [stats, setStats] = useState<Merged | null>(null);
 
   useEffect(() => {
-    getStats().then(setStats);
+    (async () => {
+      // Ledger truth first (§9.7); v2.1 play counts fill the gaps.
+      const [ledger, legacy] = await Promise.all([
+        mindbeat.stats().catch(() => null as MindbeatStats),
+        getStats().catch(() => null as ListeningStats | null),
+      ]);
+      const merged: Merged = {
+        minutes: ledger?.minutes ?? legacy?.minutesEstimate ?? 0,
+        streams: ledger?.streams ?? legacy?.totalPlays ?? 0,
+        songs: ledger?.topTracks.length ?? legacy?.distinctTracks ?? 0,
+        topArtists: (ledger?.topArtists?.length ? ledger.topArtists : legacy?.topArtists ?? []).map((a) => ({
+          artist: a.artist,
+          plays: a.plays,
+          artwork: (a as { artwork?: string }).artwork,
+        })),
+        topTracks: (ledger?.topTracks?.length
+          ? ledger.topTracks
+          : (legacy?.topTracks ?? []).map((e) => ({ track: e.track, plays: e.count }))),
+        byHour: ledger?.byHour,
+        streakDays: ledger?.streakDays,
+        skipRate: ledger?.skipRate,
+        sessions: ledger?.sessions,
+      };
+      setStats(merged);
+    })();
   }, []);
 
   return (
@@ -46,7 +118,9 @@ export function StatsScreen() {
           <Ionicons name="chevron-back" size={26} color={colors.text} />
         </PressableScale>
         <Text style={styles.topLabel}>Your Sound</Text>
-        <View style={{ width: 26 }} />
+        <PressableScale hitSlop={12} onPress={() => nav.navigate('Taste')}>
+          <Ionicons name="finger-print-outline" size={22} color={colors.textDim} />
+        </PressableScale>
       </View>
 
       {!stats ? (
@@ -64,11 +138,30 @@ export function StatsScreen() {
           >
             <Text style={styles.heroTitle}>Your listening</Text>
             <View style={styles.heroRow}>
-              <HeroStat value={fmtMinutes(stats.minutesEstimate)} label="minutes" />
-              <HeroStat value={String(stats.totalPlays)} label="plays" />
-              <HeroStat value={String(stats.distinctTracks)} label="songs" />
+              <HeroStat value={fmtMinutes(stats.minutes)} label="minutes" />
+              <HeroStat value={String(stats.streams)} label="streams" />
+              <HeroStat value={String(stats.songs)} label="songs" />
             </View>
+            {stats.streakDays != null && stats.streakDays > 0 ? (
+              <View style={styles.streakRow}>
+                <Ionicons name="flame" size={14} color={colors.aiEnd} />
+                <Text style={styles.streakText}>
+                  {stats.streakDays}-day streak · {Math.round((stats.skipRate ?? 0) * 100)}% skip rate
+                  {stats.sessions ? ` · ${stats.sessions} sessions` : ''}
+                </Text>
+              </View>
+            ) : null}
           </LinearGradient>
+
+          {/* Taste DNA entry — see and edit what the app believes (§6.6) */}
+          <PressableScale haptic style={styles.dnaCard} onPress={() => nav.navigate('Taste')}>
+            <Ionicons name="finger-print" size={22} color={colors.aiEnd} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.dnaTitle}>Taste DNA</Text>
+              <Text style={styles.dnaSub}>See what TSF AI believes about you — and change it</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+          </PressableScale>
 
           {/* Top artists */}
           <Text style={styles.sectionTitle}>Top artists</Text>
@@ -82,7 +175,7 @@ export function StatsScreen() {
                     {a.artist}
                   </Text>
                   <Text style={styles.artistPlays}>
-                    {a.plays} {a.plays === 1 ? 'play' : 'plays'}
+                    {a.plays} {a.plays === 1 ? 'stream' : 'streams'}
                   </Text>
                 </View>
                 {i === 0 ? <Ionicons name="trophy" size={18} color={colors.aiEnd} /> : null}
@@ -91,6 +184,9 @@ export function StatsScreen() {
           ) : (
             <Text style={styles.emptyText}>Play some music to build your taste profile</Text>
           )}
+
+          {/* Listening clock — the ledger's visible proof (§9.7) */}
+          {stats.byHour && stats.byHour.some((n) => n > 0) ? <ListeningClock byHour={stats.byHour} /> : null}
 
           {/* Top tracks */}
           {stats.topTracks.length ? (
@@ -116,7 +212,7 @@ export function StatsScreen() {
                       {e.track.title}
                     </Text>
                     <Text style={styles.trackSub} numberOfLines={1}>
-                      {e.track.artist} · {e.count} {e.count === 1 ? 'play' : 'plays'}
+                      {e.track.artist} · {e.plays} {e.plays === 1 ? 'stream' : 'streams'}
                     </Text>
                   </View>
                 </PressableScale>
@@ -159,6 +255,7 @@ const styles = StyleSheet.create({
   loadingText: { color: colors.textDim, fontSize: 14, fontFamily: fonts.medium },
   hero: {
     margin: spacing.lg,
+    marginBottom: spacing.sm,
     borderRadius: radius.squircle,
     padding: spacing.xl,
     gap: spacing.md,
@@ -174,6 +271,22 @@ const styles = StyleSheet.create({
   heroStat: { alignItems: 'center', gap: 2 },
   heroValue: { color: '#fff', fontSize: 26, fontWeight: '900', fontFamily: fonts.black },
   heroLabel: { color: 'rgba(255,255,255,0.8)', fontSize: 12, fontFamily: fonts.medium },
+  streakRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  streakText: { color: 'rgba(255,255,255,0.85)', fontSize: 12.5, fontFamily: fonts.medium },
+  dnaCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    padding: spacing.lg,
+  },
+  dnaTitle: { color: colors.text, fontSize: 15, fontWeight: '700', fontFamily: fonts.bold },
+  dnaSub: { color: colors.textDim, fontSize: 12, fontFamily: fonts.regular, marginTop: 2 },
   sectionTitle: {
     color: colors.text,
     fontSize: 21,
@@ -200,6 +313,22 @@ const styles = StyleSheet.create({
   },
   artistName: { color: colors.text, fontSize: 15, fontWeight: '600', fontFamily: fonts.semibold },
   artistPlays: { color: colors.textDim, fontSize: 12.5, fontFamily: fonts.regular },
+  clockWrap: {
+    margin: spacing.lg,
+    marginTop: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+    padding: spacing.lg,
+  },
+  clockTitle: { color: colors.text, fontSize: 15, fontWeight: '700', fontFamily: fonts.bold },
+  clockSub: { color: colors.textDim, fontSize: 12, fontFamily: fonts.regular, marginTop: 2, marginBottom: spacing.md },
+  clockRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 3, height: 80 },
+  clockCol: { flex: 1, alignItems: 'center' },
+  clockBarWrap: { height: 64, justifyContent: 'flex-end' },
+  clockBar: { width: '100%', borderRadius: 2, minHeight: 3 },
+  clockLabel: { color: colors.textFaint, fontSize: 9, fontFamily: fonts.medium, marginTop: 2 },
   trackRow: {
     flexDirection: 'row',
     alignItems: 'center',
