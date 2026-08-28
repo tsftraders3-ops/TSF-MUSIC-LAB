@@ -200,3 +200,35 @@ Stage Summary:
 - FINAL SHIP: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v2.3.1 (install this one)
 - Rollback complete: app is byte-identical to the v2.3 UI the user preferred
 - Reminder: user rotates GitHub token after session
+
+---
+Task ID: 8
+Agent: Super Z (main agent)
+Task: v2.4.1 — forensic root-cause hunt + "Clean Spotify Android" fix (user: "you are changing everything but still the UI is not looking even closer to Spotify... maybe there's a deeper issue... fix the problem, verify end-to-end, push as 2.4")
+
+Work Log:
+- FORENSIC AUDIT of the whole pipeline (user suspected workflow/build issues):
+  • CI workflow + bundle freshness: CLEARED — v2.4.0 APK contained all v2.4 markers (chipActiveBg/fabGreen/openQueue/contextId); versionCodes monotonic (v2.4.0=116, v2.3.1=120); rollback bundle verified marker-absent
+  • Fonts: CLEARED — all six Figtree files are true TTFs (magic bytes), distinct real weights (PIL render coverage 1.00x→1.95x), registered family names match every fontFamily usage (automated audit, zero orphans)
+  • Palette extraction: CLEARED live — ran the exact device path against live JioSaavn: content.getCharts + playlist.getDetails → art500 → 50x50 downgrade → fetch → JPEG magic bytes → jpeg-js decode all succeed (50x50 variants exist, 1.4-1.7KB, decode <60ms)
+- ROOT CAUSE FOUND (design, not mechanical): VLM harsh critique of my own v2.4 home screenshot + pixel-sampling genuine Spotify refs revealed:
+  1. THE BIG ONE: v2.4's artwork-derived gradient wash over the home canvas reads as a MUDDY BROWN film ("dirty screen") for dark Hindi covers — real Spotify home is FLAT #121212; the artwork wash belongs ONLY on playlist/album/player pages
+  2. v2.4 quick tiles dropped album art (title-only) — real Spotify tiles always carry art
+  3. "AI" chip in the home header = instant fake tell (real Spotify: All/Music/Podcasts)
+  4. v2.3-era leftovers: white-circle play button (old Spotify), green progress knob, sharp card radii, over-bold card titles
+- FIXES (v2.4.1, built on the v2.3.1 base):
+  • HomeScreen: chips → All/Music only; ACTIVE CHIP = WHITE pill + #191919 text (pixel-verified vs genuine ref); canvas stays flat #121212
+  • LibraryScreen chips → same white-active system
+  • QuickTile: 56px, radius 6, art flush-left square 56px (art is back inside tiles)
+  • ShelfCard art radius 6→8; card titles bold(700)→semibold(600) 14px (real Spotify card titles are medium weight)
+  • MiniPlayer: art 40px, title 15px (authentic proportions; flat #282828 card + bottom progress line kept)
+  • PlayerScreen: play/pause → PLAIN 62px WHITE GLYPH (no circle — current Spotify); progress thumb green→WHITE; artwork radius 10→8; bg gradient → boostForPlayer(dominant)→wash→#121212
+  • dynamic.ts: NEW vivid `wash` token (sat floor 0.50, lightness clamp 0.42-0.54) — dark covers can never render as mud; Collection + Playlist headers now use wash (this is where Spotify's artwork tinting actually lives)
+  • theme.ts: chipActiveBg #FFFFFF / chipActiveText #191919 / chipInactiveBg #282828 tokens
+- VISUAL GAUNTLET (web harness, real extraction path, 412x915): home ✓ (white chip active, flat canvas, art tiles), player ✓ (plain white glyph, white thumb, artwork gradient), collection ✓ (vivid wash + green FAB + hero), library ✓ (white pill chips, square/circular rows) — all VLM-verified live
+- Gates: tsc --noEmit CLEAN ×3; Android Metro export CLEAN (2.9MB hbc); bundle markers chipActiveBg/chipActiveText/chipInactiveBg/wash all present; webmocks NOT leaked
+
+Stage Summary:
+- v2.4.1 = the honest fix: real Spotify home is FLAT + white-active pills + art tiles; artwork washes live only on playlist/album/player; modern play glyph + white thumb
+- The "deeper issue" was misapplied design (muddy wash on home + fidelity stack), NOT the build pipeline (verified clean end-to-end)
+- All playback/AI/safety/download logic untouched — pure UI layer

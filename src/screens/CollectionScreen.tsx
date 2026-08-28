@@ -88,7 +88,7 @@ export function CollectionScreen() {
     <View style={[styles.root, { paddingTop: insets.top }]}>
       {/* Spotify's tinted header wash: album color melting into #121212 */}
       <LinearGradient
-        colors={[isLiked ? '#450AF5' : palette.dominant, '#121212']}
+        colors={[isLiked ? '#450AF5' : palette.wash, '#121212']}
         locations={[0, 0.85]}
         style={styles.headerWash}
         pointerEvents="none"

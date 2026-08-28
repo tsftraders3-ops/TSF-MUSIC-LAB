@@ -192,7 +192,7 @@ export function PlayerScreen() {
     <View style={styles.root}>
       {/* Spotify's signature: a gradient built from the artwork's own color */}
       <LinearGradient
-        colors={[boostForPlayer(palette.vibrant), palette.dominant, '#121212']}
+        colors={[boostForPlayer(palette.dominant), palette.wash, '#121212']}
         locations={[0, 0.42, 0.85]}
         style={StyleSheet.absoluteFill}
       />
@@ -295,9 +295,9 @@ export function PlayerScreen() {
             ) : (
               <Ionicons
                 name={isPlaying ? 'pause' : 'play'}
-                size={34}
-                color={colors.black}
-                style={{ marginLeft: isPlaying ? 0 : 3 }}
+                size={62}
+                color={colors.text}
+                style={{ marginLeft: isPlaying ? 0 : 4 }}
               />
             )}
           </PressableScale>
@@ -487,7 +487,7 @@ const styles = StyleSheet.create({
   },
   artWrap: { alignItems: 'center', marginBottom: 20 },
   artCard: {
-    borderRadius: 10,
+    borderRadius: 8,
     shadowColor: '#000',
     shadowOpacity: 0.35,
     shadowRadius: 14,
@@ -547,7 +547,7 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: colors.accentBright,
+    backgroundColor: colors.text, // Spotify: white thumb
   },
   times: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 },
   time: { color: colors.textDim, fontSize: 11.5, fontFamily: fonts.medium },
@@ -560,18 +560,16 @@ const styles = StyleSheet.create({
   playBtn: {
     width: 68,
     height: 68,
-    borderRadius: 34,
-    backgroundColor: colors.text,
     alignItems: 'center',
     justifyContent: 'center',
   },
   spinner: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     borderWidth: 3,
-    borderColor: 'rgba(0,0,0,0.25)',
-    borderTopColor: colors.black,
+    borderColor: 'rgba(255,255,255,0.3)',
+    borderTopColor: colors.text,
   },
   repeatOne: {
     position: 'absolute',

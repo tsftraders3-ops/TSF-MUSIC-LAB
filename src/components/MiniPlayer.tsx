@@ -31,7 +31,7 @@ export function MiniPlayer() {
         android_ripple={{ color: 'rgba(255,255,255,0.06)' }}
         onPress={() => nav.navigate('Player')}
       >
-        <Artwork uri={active.artwork} seed={active.id} size={44} variant="mini" />
+        <Artwork uri={active.artwork} seed={active.id} size={40} variant="mini" />
         <Text style={styles.title} numberOfLines={1}>
           {active.title}
         </Text>
@@ -90,7 +90,7 @@ const styles = StyleSheet.create({
   title: {
     flex: 1,
     color: colors.text,
-    fontSize: 14.5,
+    fontSize: 15,
     fontWeight: '700',
     fontFamily: fonts.bold,
   },

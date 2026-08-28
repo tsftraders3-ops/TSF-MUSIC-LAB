@@ -37,6 +37,11 @@ export const colors = {
   accentDeep: '#000000', // black-on-green text/icons
   danger: '#E91429',
 
+  // filter chips — current Spotify Android: WHITE active pill, near-black text
+  chipActiveBg: '#FFFFFF',
+  chipActiveText: '#191919',
+  chipInactiveBg: '#282828',
+
   // AI identity — signature violet→cyan
   aiStart: '#7C4DFF',
   aiMid: '#4D6BFF',

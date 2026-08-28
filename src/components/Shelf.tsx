@@ -1,8 +1,8 @@
 /**
  * Shelf — authentic Spotify home primitives:
  *   • Shelf       — section: 22px bold header, "Show all" link, horizontal rail
- *   • ShelfCard   — square cover (6px radius) + bold title + dim subtitle
- *   • QuickTile   — the #2A2A2A home shortcut tile (art + single-line bold label)
+ *   • ShelfCard   — square cover (8px radius) + semibold title + dim subtitle
+ *   • QuickTile   — the #2A2A2A home shortcut tile (art + 2-line bold label)
  */
 
 import React from 'react';
@@ -133,8 +133,8 @@ export function QuickTile({
         <Artwork
           uri={artwork}
           seed={seed}
-          size={60}
-          variant="card"
+          size={56}
+          variant="square"
           liked={liked}
           style={styles.quickArt}
         />
@@ -177,10 +177,10 @@ const styles = StyleSheet.create({
   scroller: { paddingHorizontal: spacing.lg, gap: spacing.md },
   cardTitle: {
     color: colors.text,
-    fontSize: 13.5,
-    fontWeight: '700',
-    fontFamily: fonts.bold,
-    lineHeight: 17,
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: fonts.semibold,
+    lineHeight: 18,
   },
   cardSubtitle: {
     color: colors.textDim,
@@ -194,14 +194,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.tile, // #2A2A2A pixel-verified
-    borderRadius: 8,
+    borderRadius: 6,
     overflow: 'hidden',
-    height: 60,
+    height: 56,
   },
   quickArt: {},
   quickIconTile: {
-    width: 60,
-    height: 60,
+    width: 56,
+    height: 56,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.aiStart,

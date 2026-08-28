@@ -1,6 +1,6 @@
 /**
  * Artwork — remote cover with deterministic gradient fallback.
- * Variants mirror Spotify corner radii: 'card' shelf art (6), 'rounded'
+ * Variants mirror Spotify corner radii: 'card' shelf art (8), 'rounded'
  * rows (4), 'mini' mini-player art (4), 'circle' artists.
  * 'liked' renders Spotify's iconic purple→green Liked Songs tile.
  */
@@ -47,7 +47,7 @@ export function Artwork({
     variant === 'circle'
       ? size / 2
       : variant === 'card'
-        ? 6
+        ? 8
         : variant === 'square'
           ? 0
           : 4;

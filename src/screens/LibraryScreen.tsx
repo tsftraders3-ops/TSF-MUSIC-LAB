@@ -524,9 +524,9 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     backgroundColor: colors.card, // Spotify chip gray
   },
-  chipActive: { backgroundColor: colors.accentBright },
+  chipActive: { backgroundColor: colors.chipActiveBg },
   chipText: { color: colors.text, fontSize: 13, fontWeight: '600', fontFamily: fonts.semibold },
-  chipTextActive: { color: colors.accentDeep },
+  chipTextActive: { color: colors.chipActiveText },
   sortRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',

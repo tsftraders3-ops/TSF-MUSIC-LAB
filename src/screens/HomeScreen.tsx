@@ -39,7 +39,7 @@ import { PressableScale } from '../components/PressableScale';
 import { colors, fonts, radius, spacing } from '../theme';
 import type { RootStackParamList } from './navigation';
 
-type Chip = 'all' | 'music' | 'ai';
+type Chip = 'all' | 'music';
 
 export function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -147,7 +147,7 @@ export function HomeScreen() {
         {/* ── Header: filter chips + profile avatar (Spotify layout) ── */}
         <View style={styles.header}>
           <View style={styles.chipRow}>
-            {(['all', 'music', 'ai'] as Chip[]).map((c) => (
+            {(['all', 'music'] as Chip[]).map((c) => (
               <PressableScale
                 key={c}
                 scaleTo={0.94}
@@ -156,7 +156,7 @@ export function HomeScreen() {
                 style={[styles.chip, chip === c && styles.chipActive]}
               >
                 <Text style={[styles.chipText, chip === c && styles.chipTextActive]}>
-                  {c === 'all' ? 'All' : c === 'music' ? 'Music' : 'AI'}
+                  {c === 'all' ? 'All' : 'Music'}
                 </Text>
               </PressableScale>
             ))}
@@ -400,19 +400,19 @@ const styles = StyleSheet.create({
   },
   chipRow: { flexDirection: 'row', gap: 8 },
   chip: {
-    backgroundColor: colors.card, // #242424 — Spotify inactive chip
+    backgroundColor: colors.chipInactiveBg, // current Spotify inactive chip
     borderRadius: radius.full,
     paddingHorizontal: 14,
     paddingVertical: 7,
   },
-  chipActive: { backgroundColor: colors.accent }, // green — verified in reference
+  chipActive: { backgroundColor: colors.chipActiveBg }, // white pill (pixel-verified on real Spotify)
   chipText: {
     color: colors.text,
     fontSize: 13,
     fontWeight: '700',
     fontFamily: fonts.bold,
   },
-  chipTextActive: { color: colors.accentDeep }, // black on green
+  chipTextActive: { color: colors.chipActiveText }, // near-black on white
   avatar: {
     width: 34,
     height: 34,
@@ -421,7 +421,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: { color: colors.text, fontSize: 15, fontWeight: '800', fontFamily: fonts.extrabold },
+  avatarText: { color: colors.text, fontSize: 15, fontWeight: '700', fontFamily: fonts.bold },
   offlineChip: {
     flexDirection: 'row',
     alignItems: 'center',

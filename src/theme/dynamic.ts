@@ -29,6 +29,8 @@ export interface DynamicPalette {
   deep: string;
   /** brightened vibrant — progress bars, glows, active states */
   glow: string;
+  /** vivid mid-tone of the artwork hue — playlist/album header washes */
+  wash: string;
 }
 
 /* ── color math ─────────────────────────────────────────────────────── */
@@ -161,12 +163,21 @@ function paletteFrom(dominant: string, vibrant: string, key: string): DynamicPal
   const deepS = gray ? 0.26 : clamp(Math.max(dHsl.s, 0.3), 0.24, 0.55);
   const deepRgb = hslToRgb(deepH, deepS, 0.085);
 
+  // --- wash (vivid mid-tone for playlist/album headers + player bg): the
+  // artwork hue with saturation/lightness floors so dark covers never
+  // render as mud — always a confident, readable color
+  const washH = deepH;
+  const washS = gray ? 0.38 : clamp(Math.max(dHsl.s, 0.5), 0.42, 0.68);
+  const washL = clamp(dHsl.l, 0.42, 0.54);
+  const washRgb = hslToRgb(washH, washS, washL);
+
   return {
     key,
     dominant,
     vibrant,
     deep: hex(deepRgb.r, deepRgb.g, deepRgb.b),
     glow: hex(glowRgb.r, glowRgb.g, glowRgb.b),
+    wash: hex(washRgb.r, washRgb.g, washRgb.b),
   };
 }
 

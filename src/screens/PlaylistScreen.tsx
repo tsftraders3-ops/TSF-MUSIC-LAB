@@ -100,7 +100,7 @@ export function PlaylistScreen() {
     <View style={[styles.root, { paddingTop: insets.top }]}>
       {/* Spotify's tinted header wash: cover color melting into #121212 */}
       <LinearGradient
-        colors={[playlist.aiGenerated ? '#7C4DFF' : palette.dominant, '#121212']}
+        colors={[playlist.aiGenerated ? '#7C4DFF' : palette.wash, '#121212']}
         locations={[0, 0.85]}
         style={styles.headerWash}
         pointerEvents="none"
