@@ -1,35 +1,40 @@
 /**
- * TSF Music design system — Spotify-grade tokens.
- * Palette mirrors Spotify's 2024 dark language; Figtree substitutes
- * Circular. Every screen pulls colors/typography from here ONLY.
+ * TSF Music design system — AUTHENTIC Spotify Android tokens.
+ * Every value pixel-verified against real Spotify Android screenshots
+ * (docs/spotify-refs): bg #121212, surfaces #242424/#282828/#2A2A2A,
+ * tab bar #000000, secondary text #B3B3B3, CTA green #1ED760.
+ * Figtree substitutes Circular (same geometric grotesque skeleton).
  */
 
 export const colors = {
-  // surfaces — deep charcoal (inspo 3/5) rather than flat black
-  bg: '#0A0B0E', // base canvas
-  bgDeep: '#050609', // behind modals / player backdrop
-  surface: '#121318',
-  card: '#1A1C22', // elevated tile
-  cardDim: '#15171C',
-  elevated: '#23252C',
-  border: '#26282F',
+  // Spotify surfaces (verified by pixel-sampling references)
+  bg: '#121212', // base canvas — Spotify dark base
+  bgDeep: '#000000', // tab bar / under-modals — Spotify uses pure black here
+  surface: '#181818', // subtle raised surface
+  card: '#242424', // search field, chips, sheets
+  cardDim: '#1E1E1E',
+  elevated: '#282828', // mini player card, sheets, dialogs
+  tile: '#2A2A2A', // home quick tiles (pixel-sampled #2A2A2A)
+  border: '#282828',
 
-  // glassmorphism tokens (inspo 1/2) — translucency + hairline edges
-  glass: 'rgba(255,255,255,0.065)',
-  glassStrong: 'rgba(255,255,255,0.10)',
-  glassBorder: 'rgba(255,255,255,0.09)',
-  glassBorderStrong: 'rgba(255,255,255,0.16)',
+  // legacy glass tokens → re-pointed to Spotify solids so any
+  // un-migrated surface still lands on authentic colors
+  glass: '#242424',
+  glassStrong: '#282828',
+  glassBorder: 'rgba(0,0,0,0)',
+  glassBorderStrong: 'rgba(0,0,0,0)',
 
   // text
   text: '#FFFFFF',
   textDim: '#B3B3B3', // Spotify secondary
-  textFaint: '#737373',
+  textFaint: '#6A6A6A', // Spotify tertiary
+  textOnGreen: '#000000', // Spotify puts black on green CTAs
 
   // brand
-  accent: '#1DB954', // Spotify green
-  accentBright: '#1ED760', // CTA green (play buttons)
+  accent: '#1DB954', // Spotify green (brand, active chip)
+  accentBright: '#1ED760', // CTA green (play FABs, equalizer)
   accentDim: '#169C46',
-  accentDeep: '#06130B', // text on green
+  accentDeep: '#000000', // black-on-green text/icons
   danger: '#E91429',
 
   // AI identity — signature violet→cyan
@@ -40,7 +45,10 @@ export const colors = {
   // misc
   white: '#FFFFFF',
   black: '#000000',
-  overlay: 'rgba(0,0,0,0.55)',
+  overlay: 'rgba(0,0,0,0.6)',
+  inactiveTab: '#A7A7A7', // Spotify inactive tab label/icon
+  likedStart: '#450AF5', // Spotify Liked Songs gradient
+  likedEnd: '#C4EFA1',
 };
 
 /** Figtree weights loaded via expo-font in App.tsx. */
@@ -76,41 +84,42 @@ export const spacing = {
   xxl: 32,
 };
 
+/** Spotify radii — small and confident. */
 export const radius = {
-  sm: 6,
-  md: 10,
-  lg: 14,
-  xl: 18,
-  xxl: 24,
-  squircle: 20, // inspo 1/2/5 signature soft card
+  sm: 4, // row artwork, quick-tile art
+  md: 6, // shelf cards, mini player art
+  lg: 8, // mini player card, player artwork, genre cards
+  xl: 12, // sheets, dialogs
+  xxl: 16,
+  squircle: 8,
   full: 999,
 };
 
-/** Spotify-ish type scale (px). */
+/** Spotify type scale (px). */
 export const type = {
-  hero: 26,
-  title: 22,
+  hero: 24,
+  title: 22, // shelf headers
   headline: 18,
-  subhead: 15,
+  subhead: 16,
   body: 15,
   caption: 13,
   micro: 11,
 };
 
-/** Genre tile palette for Search "Browse all" — Spotify's colorful grid. */
+/** Spotify "Browse all" genre card colors — the real browse palette. */
 export const genreColors: Array<[string, string]> = [
-  ['#E8115B', '#C4187C'], // pop
-  ['#8D67AB', '#5E4B8B'], // bollywood
-  ['#DC148C', '#9B1B7A'], // punjabi
-  ['#1E3264', '#132A4E'], // hip hop
-  ['#E13300', '#A82600'], // rock
-  ['#477D95', '#2E5468'], // chill
-  ['#BA5D07', '#8C4405'], // lo-fi
-  ['#503750', '#332233'], // devotional
-  ['#0D73EC', '#0A57B0'], // party
-  ['#537AA1', '#35516C'], // romance
-  ['#AF2896', '#7C1B6B'], // workout
-  ['#7D4B32', '#573322'], // acoustic
+  ['#8D67AB', '#8D67AB'], // Made For You
+  ['#E8115B', '#E8115B'], // Bollywood
+  ['#DC148C', '#DC148C'], // Punjabi
+  ['#1E3264', '#1E3264'], // Hip-Hop
+  ['#E13300', '#E13300'], // Rock
+  ['#477D95', '#477D95'], // Chill
+  ['#BA5D07', '#BA5D07'], // Lo-Fi
+  ['#503750', '#503750'], // Devotional
+  ['#0D73EC', '#0D73EC'], // Party
+  ['#537AA1', '#537AA1'], // Romance
+  ['#AF2896', '#AF2896'], // Workout
+  ['#7D4B32', '#7D4B32'], // Acoustic
 ];
 
 export function genreGradient(i: number): [string, string] {

@@ -1,15 +1,15 @@
 /**
- * Artwork v2 — remote cover with deterministic gradient fallback.
- * Variants match Spotify: full-radius shelf cards, small-radius row art.
- * The fallback renders a diagonal gradient with a musical-note glyph so
- * placeholder covers still look designed, never broken.
+ * Artwork — remote cover with deterministic gradient fallback.
+ * Variants mirror Spotify corner radii: 'card' shelf art (6), 'rounded'
+ * rows (4), 'mini' mini-player art (4), 'circle' artists.
+ * 'liked' renders Spotify's iconic purple→green Liked Songs tile.
  */
 
 import React from 'react';
-import { Image, StyleSheet, View, type StyleProp, type ImageStyle } from 'react-native';
+import { Image, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, radius } from '../theme';
+import { colors } from '../theme';
 
 const GRADIENTS: Array<[string, string]> = [
   ['#7C4DFF', '#00E5FF'],
@@ -32,24 +32,43 @@ export function Artwork({
   size,
   style,
   variant = 'rounded',
+  liked = false,
 }: {
   uri?: string;
   seed: string;
   size: number;
-  style?: StyleProp<ImageStyle>;
-  /** 'card' = Spotify full-radius shelf art, 'rounded' = rows/player */
-  variant?: 'card' | 'rounded' | 'circle';
+  style?: StyleProp<ViewStyle>;
+  variant?: 'card' | 'rounded' | 'mini' | 'circle' | 'square';
+  /** Render Spotify's Liked Songs gradient heart tile. */
+  liked?: boolean;
 }) {
   const [failed, setFailed] = React.useState(false);
-  const [a, b] = gradientFor(seed);
   const borderRadius =
     variant === 'circle'
       ? size / 2
       : variant === 'card'
-        ? Math.max(8, size * 0.104)
-        : Math.max(5, size * 0.062);
+        ? 6
+        : variant === 'square'
+          ? 0
+          : 4;
+
+  if (liked) {
+    return (
+      <View style={[styles.fallback, { width: size, height: size, borderRadius }, style]}>
+        <LinearGradient
+          colors={[colors.likedStart, colors.likedEnd]}
+          start={{ x: 0.1, y: 0.1 }}
+          end={{ x: 0.9, y: 0.9 }}
+          style={[styles.gradient, { borderRadius }]}
+        >
+          <Ionicons name="heart" size={Math.max(14, size * 0.42)} color="#FFFFFF" />
+        </LinearGradient>
+      </View>
+    );
+  }
 
   if (!uri || failed) {
+    const [a, b] = gradientFor(seed);
     return (
       <View style={[styles.fallback, { width: size, height: size, borderRadius }, style]}>
         <LinearGradient
@@ -64,16 +83,25 @@ export function Artwork({
     );
   }
   return (
-    <Image
-      source={{ uri }}
-      style={[styles.image, { width: size, height: size, borderRadius }, style]}
-      onError={() => setFailed(true)}
-    />
+    <View
+      style={[
+        styles.imageWrap,
+        { width: size, height: size, borderRadius, overflow: 'hidden' },
+        style,
+      ]}
+    >
+      <Image
+        source={{ uri }}
+        style={styles.imageFill}
+        onError={() => setFailed(true)}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  image: { backgroundColor: colors.surface },
+  imageWrap: { backgroundColor: colors.surface },
+  imageFill: { width: '100%', height: '100%' },
   fallback: { overflow: 'hidden' },
   gradient: {
     width: '100%',

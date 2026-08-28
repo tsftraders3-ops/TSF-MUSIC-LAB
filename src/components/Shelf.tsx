@@ -1,14 +1,13 @@
 /**
- * Shelf v2 — Spotify home shelf primitives:
- *   • Shelf      — section with 22px bold header + horizontal rail
- *   • ShelfCard  — full-radius cover card with title/subtitle
- *   • ShelfCardWide — rectangle (playlist-ish) card variant
+ * Shelf — authentic Spotify home primitives:
+ *   • Shelf       — section: 22px bold header, "Show all" link, horizontal rail
+ *   • ShelfCard   — square cover (6px radius) + bold title + dim subtitle
+ *   • QuickTile   — the #2A2A2A home shortcut tile (art + single-line bold label)
  */
 
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { colors, fonts, radius, spacing } from '../theme';
 import { Artwork } from './Artwork';
 import { PressableScale } from './PressableScale';
@@ -19,23 +18,33 @@ export function ShelfCard({
   artwork,
   seed,
   onPress,
-  size = 140,
-  round = true,
+  onLongPress,
+  size = 150,
+  round = false,
   badge,
+  subtitleMaxLines = 2,
 }: {
   title: string;
   subtitle?: string;
   artwork?: string;
   seed: string;
   onPress: () => void;
+  onLongPress?: () => void;
   size?: number;
+  /** artist round covers */
   round?: boolean;
   badge?: React.ReactNode;
+  subtitleMaxLines?: number;
 }) {
   return (
-    <PressableScale onPress={onPress} style={{ width: size, gap: 10 }} haptic>
+    <PressableScale
+      onPress={onPress}
+      onLongPress={onLongPress}
+      style={{ width: size, gap: 8 }}
+      haptic
+    >
       <View>
-        <Artwork uri={artwork} seed={seed} size={size} variant={round ? 'card' : 'rounded'} />
+        <Artwork uri={artwork} seed={seed} size={size} variant={round ? 'circle' : 'card'} />
         {badge}
       </View>
       <View style={styles.textWrap}>
@@ -43,7 +52,7 @@ export function ShelfCard({
           {title}
         </Text>
         {subtitle ? (
-          <Text style={styles.cardSubtitle} numberOfLines={2}>
+          <Text style={styles.cardSubtitle} numberOfLines={subtitleMaxLines}>
             {subtitle}
           </Text>
         ) : null}
@@ -85,46 +94,67 @@ export function Shelf({
   );
 }
 
-/** Home shortcut tile — glass pill chip (inspo 1) with art + label. */
+/**
+ * QuickTile — Spotify home shortcut: #2A2A2A tile, rounded-square artwork
+ * flush-left, bold white single-line label.
+ */
 export function QuickTile({
   title,
+  subtitle,
   artwork,
   seed,
   onPress,
   width,
   icon,
+  liked = false,
 }: {
   title: string;
+  subtitle?: string;
   artwork?: string;
   seed: string;
   onPress: () => void;
   width: number;
-  /** When set, renders a gradient + icon tile (e.g. Liked Songs). */
+  /** gradient icon tile (e.g. AI) */
   icon?: keyof typeof Ionicons.glyphMap;
+  liked?: boolean;
 }) {
   return (
-    <PressableScale onPress={onPress} haptic style={[styles.quickTile, { width }]}>
-      {icon && !artwork ? (
-        <LinearGradient
-          colors={['#4D2B8F', '#7C4DFF']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.quickIconWrap}
-        >
-          <Ionicons name={icon} size={22} color="#fff" />
-        </LinearGradient>
+    <PressableScale
+      onPress={onPress}
+      scaleTo={0.97}
+      haptic
+      style={[styles.quickTile, { width }]}
+    >
+      {icon ? (
+        <View style={styles.quickIconTile}>
+          <Ionicons name={icon} size={26} color="#FFFFFF" />
+        </View>
       ) : (
-        <Artwork uri={artwork} seed={seed} size={54} variant="rounded" style={styles.quickArt} />
+        <Artwork
+          uri={artwork}
+          seed={seed}
+          size={60}
+          variant="card"
+          liked={liked}
+          style={styles.quickArt}
+        />
       )}
-      <Text style={styles.quickTitle} numberOfLines={2}>
-        {title}
-      </Text>
+      <View style={styles.quickText}>
+        <Text style={styles.quickTitle} numberOfLines={2}>
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text style={styles.quickSubtitle} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
     </PressableScale>
   );
 }
 
 const styles = StyleSheet.create({
-  shelf: { gap: 6, marginBottom: spacing.lg + 6 },
+  shelf: { gap: 12, marginBottom: 32 },
   header: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -133,58 +163,61 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: colors.text,
-    fontSize: 21,
-    fontWeight: '800',
-    fontFamily: fonts.extrabold,
+    fontSize: 22,
+    fontWeight: '700',
+    fontFamily: fonts.bold,
     letterSpacing: -0.3,
   },
   headerAction: {
-    color: colors.textFaint,
+    color: colors.textDim,
     fontSize: 13,
-    fontWeight: '600',
-    fontFamily: fonts.semibold,
+    fontWeight: '400',
+    fontFamily: fonts.regular,
   },
-  scroller: { paddingHorizontal: spacing.lg, gap: spacing.md + 2 },
+  scroller: { paddingHorizontal: spacing.lg, gap: spacing.md },
   cardTitle: {
     color: colors.text,
-    fontSize: 13,
-    fontWeight: '600',
-    fontFamily: fonts.semibold,
+    fontSize: 13.5,
+    fontWeight: '700',
+    fontFamily: fonts.bold,
+    lineHeight: 17,
   },
   cardSubtitle: {
     color: colors.textDim,
-    fontSize: 12,
+    fontSize: 13,
     fontFamily: fonts.regular,
     marginTop: 2,
-    lineHeight: 15,
+    lineHeight: 16,
   },
-  textWrap: { gap: 1, paddingRight: 2 },
+  textWrap: { gap: 2, paddingRight: 2 },
   quickTile: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.glass,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glassBorder,
+    backgroundColor: colors.tile, // #2A2A2A pixel-verified
+    borderRadius: 8,
     overflow: 'hidden',
-    height: 62,
+    height: 60,
   },
-  quickArt: { borderRadius: 10, marginLeft: 6 },
-  quickIconWrap: {
-    width: 54,
-    height: 54,
-    marginLeft: 6,
-    borderRadius: 12,
+  quickArt: {},
+  quickIconTile: {
+    width: 60,
+    height: 60,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.aiStart,
   },
+  quickText: { flex: 1, paddingHorizontal: 10, paddingRight: 8 },
   quickTitle: {
-    flex: 1,
     color: colors.text,
     fontSize: 13,
     fontWeight: '700',
     fontFamily: fonts.bold,
-    paddingHorizontal: 10,
     lineHeight: 16,
+  },
+  quickSubtitle: {
+    color: colors.textDim,
+    fontSize: 11,
+    fontFamily: fonts.regular,
+    marginTop: 1,
   },
 });

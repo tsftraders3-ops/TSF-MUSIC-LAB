@@ -21,7 +21,6 @@ import { TrackMenu } from '../components/TrackMenu';
 import { useToast } from '../components/Toast';
 import { colors, fonts, radius, spacing } from '../theme';
 import { useTrackPalette } from '../theme/DynamicThemeProvider';
-import { withAlpha } from '../theme/dynamic';
 import type { RootStackParamList } from './navigation';
 
 export function PlaylistScreen() {
@@ -99,13 +98,10 @@ export function PlaylistScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      {/* tinted header wash */}
+      {/* Spotify's tinted header wash: cover color melting into #121212 */}
       <LinearGradient
-        colors={[
-          withAlpha(playlist.aiGenerated ? '#7C4DFF' : palette.deep, 0.92),
-          withAlpha(playlist.aiGenerated ? '#7C4DFF' : palette.deep, 0.35),
-          'rgba(10,11,14,0)',
-        ]}
+        colors={[playlist.aiGenerated ? '#7C4DFF' : palette.dominant, '#121212']}
+        locations={[0, 0.85]}
         style={styles.headerWash}
         pointerEvents="none"
       />
@@ -133,40 +129,45 @@ export function PlaylistScreen() {
                 <Ionicons name="sparkles" size={44} color="#fff" />
               </LinearGradient>
             ) : (
-              <Artwork
-                uri={playlist.tracks[0]?.artwork}
-                seed={playlist.id}
-                size={188}
-                variant="rounded"
-              />
+              <View style={styles.artWrap}>
+                <Artwork
+                  uri={playlist.tracks[0]?.artwork}
+                  seed={playlist.id}
+                  size={204}
+                  variant="card"
+                  style={styles.art}
+                />
+              </View>
             )}
             <Text style={styles.name}>{playlist.name}</Text>
             <Text style={styles.meta}>
-              {playlist.tracks.length} songs
+              Playlist · {playlist.tracks.length} songs
               {playlist.prompt ? ` · from “${playlist.prompt}”` : ''}
             </Text>
+            {/* Spotify action row */}
             <View style={styles.actions}>
-              <PressableScale
-                haptic
-                style={[
-                  styles.playBtn,
-                  { backgroundColor: playlist.aiGenerated ? colors.accentBright : palette.glow },
-                ]}
-                onPress={() => play(0)}
-                disabled={!playlist.tracks.length}
-              >
-                <Ionicons name="play" size={21} color="#07080B" />
-                <Text style={[styles.playBtnText, { color: '#07080B' }]}>Play</Text>
-              </PressableScale>
-              <PressableScale
-                haptic
-                style={styles.shuffleBtn}
-                onPress={playShuffled}
-                disabled={!playlist.tracks.length}
-              >
-                <Ionicons name="shuffle" size={19} color={colors.text} />
-                <Text style={styles.shuffleBtnText}>Shuffle</Text>
-              </PressableScale>
+              <View style={styles.actionLeft}>
+                <PressableScale
+                  hitSlop={8}
+                  haptic
+                  onPress={() => toast.show({ message: 'Added to Your Library', icon: 'heart' })}
+                >
+                  <Ionicons name="heart-outline" size={26} color={colors.text} />
+                </PressableScale>
+              </View>
+              <View style={styles.actionRight}>
+                <PressableScale hitSlop={8} haptic onPress={playShuffled} disabled={!playlist.tracks.length}>
+                  <Ionicons name="shuffle" size={26} color={colors.text} />
+                </PressableScale>
+                <PressableScale
+                  haptic
+                  onPress={() => play(0)}
+                  disabled={!playlist.tracks.length}
+                  style={styles.playFab}
+                >
+                  <Ionicons name="play" size={26} color={colors.black} style={{ marginLeft: 2 }} />
+                </PressableScale>
+              </View>
             </View>
           </View>
         }
@@ -203,7 +204,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   headerWash: {
     ...StyleSheet.absoluteFillObject,
-    bottom: '55%',
+    bottom: '58%',
   },
   topBar: {
     flexDirection: 'row',
@@ -228,43 +229,57 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   aiArt: {
-    width: 188,
-    height: 188,
+    width: 204,
+    height: 204,
     borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 12,
   },
+  artWrap: {
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 12,
+  },
+  art: {},
   name: {
     color: colors.text,
     fontSize: 26,
-    fontWeight: '900',
-    fontFamily: fonts.black,
+    fontWeight: '700',
+    fontFamily: fonts.bold,
     textAlign: 'center',
     letterSpacing: -0.4,
+    marginTop: spacing.sm,
   },
-  meta: { color: colors.textDim, fontSize: 13, fontFamily: fonts.medium },
-  actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
-  playBtn: {
+  meta: { color: colors.textDim, fontSize: 13, fontFamily: fonts.regular },
+  actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    borderRadius: radius.full,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: 12,
+    justifyContent: 'space-between',
+    alignSelf: 'stretch',
+    paddingTop: spacing.sm,
   },
-  playBtnText: { fontSize: 15, fontWeight: '800', fontFamily: fonts.extrabold },
-  shuffleBtn: {
-    flexDirection: 'row',
+  actionLeft: { flexDirection: 'row', alignItems: 'center', gap: 20 },
+  actionRight: { flexDirection: 'row', alignItems: 'center', gap: 22 },
+  playFab: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.accentBright,
     alignItems: 'center',
-    gap: 7,
-    backgroundColor: colors.glass,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glassBorder,
-    borderRadius: radius.full,
-    paddingHorizontal: spacing.lg + 4,
-    paddingVertical: 12,
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
   },
-  shuffleBtnText: { color: colors.text, fontSize: 14, fontWeight: '700', fontFamily: fonts.bold },
   empty: { alignItems: 'center', gap: spacing.md, padding: spacing.xxl, paddingTop: spacing.xxl + 10 },
   emptyTitle: { color: colors.text, fontSize: 17, fontWeight: '800', fontFamily: fonts.extrabold },
   emptySub: { color: colors.textDim, fontSize: 13, textAlign: 'center', fontFamily: fonts.regular },

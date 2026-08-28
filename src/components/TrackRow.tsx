@@ -1,8 +1,9 @@
 /**
- * TrackRow v2 — the workhorse row, tuned to Spotify specs:
- * 52px rounded art, 16/500 title, 13/400 dim subtitle, explicit "E" box,
- * animated equalizer on the active track, sparkle badge for Smart Shuffle
- * picks, heart toggle, optional index / custom right slot / long-press.
+ * TrackRow — the workhorse row, tuned to Spotify specs:
+ * 52px rounded art (4px), 16/500 title, 13/400 dim subtitle, explicit
+ * "E" box, animated green equalizer on the active track, sparkle badge
+ * for Smart Shuffle picks, optional heart toggle / index / custom right
+ * slot / long-press. Spotify lists show no hearts by default.
  */
 
 import React, { useEffect, useRef } from 'react';
@@ -76,7 +77,7 @@ export function TrackRow({
   onLongPress,
   style,
   showArtwork = true,
-  showHeart = true,
+  showHeart = false,
   right,
   subtitle,
 }: {

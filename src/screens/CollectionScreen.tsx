@@ -1,8 +1,10 @@
 /**
- * Collection v2 — generic detail page for charts, genre searches,
- * artist radios and local track lists (Liked Songs, Daily Mixes,
- * Trending). Lazy-resolves tracks when the route carries none:
- *   kind 'chart' → JioSaavn playlist, kind 'search' → clean search.
+ * Collection — authentic Spotify album/playlist detail page:
+ *   artwork-tinted gradient header · big centered cover · centered bold
+ *   title + meta · Spotify action row (heart, download, dots — shuffle +
+ *   green play FAB right) · track rows. Lazy-resolves tracks when the
+ *   route carries none: kind 'chart' → JioSaavn playlist,
+ *   kind 'search' → clean search.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -19,15 +21,16 @@ import { TrackRow } from '../components/TrackRow';
 import { Artwork } from '../components/Artwork';
 import { PressableScale } from '../components/PressableScale';
 import { TrackMenu } from '../components/TrackMenu';
+import { useToast } from '../components/Toast';
 import { colors, fonts, radius, spacing } from '../theme';
 import { useTrackPalette } from '../theme/DynamicThemeProvider';
-import { withAlpha } from '../theme/dynamic';
 import type { RootStackParamList } from './navigation';
 
 export function CollectionScreen() {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, 'Collection'>>();
   const insets = useSafeAreaInsets();
+  const toast = useToast();
   const { playQueue } = usePlayer();
   const { collection, tracks: routeTracks } = route.params;
 
@@ -77,14 +80,16 @@ export function CollectionScreen() {
   };
 
   const heroArt = tracks?.[0]?.artwork || collection.artwork;
+  const isLiked = collection.title === 'Liked Songs';
   // every collection wears its own artwork's colors (Spotify-style tint)
-  const palette = useTrackPalette(heroArt, collection.id);
+  const palette = useTrackPalette(isLiked ? undefined : heroArt, collection.id);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      {/* tinted header wash — deep album color melting into the canvas */}
+      {/* Spotify's tinted header wash: album color melting into #121212 */}
       <LinearGradient
-        colors={[withAlpha(palette.deep, 0.95), withAlpha(palette.deep, 0.4), 'rgba(10,11,14,0)']}
+        colors={[isLiked ? '#450AF5' : palette.dominant, '#121212']}
+        locations={[0, 0.85]}
         style={styles.headerWash}
         pointerEvents="none"
       />
@@ -93,7 +98,7 @@ export function CollectionScreen() {
           <Ionicons name="chevron-back" size={26} color={colors.text} />
         </PressableScale>
         <Text style={styles.topLabel} numberOfLines={1}>
-          {collection.subtitle ?? 'Collection'}
+          {collection.subtitle ?? ''}
         </Text>
         <View style={{ width: 26 }} />
       </View>
@@ -101,29 +106,55 @@ export function CollectionScreen() {
       <FlatList
         data={tracks ?? []}
         keyExtractor={(t) => t.id}
-        contentContainerStyle={{ paddingBottom: 160, flexGrow: 1 }}
+        contentContainerStyle={{ paddingBottom: 170, flexGrow: 1 }}
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
           <View style={styles.headerCard}>
-            <Artwork uri={heroArt} seed={collection.id} size={188} variant="rounded" />
+            <View style={styles.artWrap}>
+              {isLiked ? (
+                <Artwork seed="liked" size={204} liked variant="card" style={styles.art} />
+              ) : (
+                <Artwork
+                  uri={heroArt}
+                  seed={collection.id}
+                  size={204}
+                  variant="card"
+                  style={styles.art}
+                />
+              )}
+            </View>
             <Text style={styles.title}>{collection.title}</Text>
             <Text style={styles.sub}>
               {tracks ? `${tracks.length} songs · 320 kbps` : 'Loading…'}
             </Text>
+
+            {/* Spotify action row */}
             {tracks && tracks.length ? (
               <View style={styles.actions}>
-                <PressableScale
-                  haptic
-                  style={[styles.playBtn, { backgroundColor: palette.glow, shadowColor: palette.glow }]}
-                  onPress={() => play(0)}
-                >
-                  <Ionicons name="play" size={21} color="#07080B" />
-                  <Text style={[styles.playBtnText, { color: '#07080B' }]}>Play</Text>
-                </PressableScale>
-                <PressableScale haptic style={styles.shuffleBtn} onPress={playShuffled}>
-                  <Ionicons name="shuffle" size={19} color={colors.text} />
-                  <Text style={styles.shuffleBtnText}>Shuffle</Text>
-                </PressableScale>
+                <View style={styles.actionLeft}>
+                  <PressableScale
+                    hitSlop={8}
+                    haptic
+                    onPress={() => toast.show({ message: 'Added to Your Library', icon: 'heart' })}
+                  >
+                    <Ionicons name="heart-outline" size={26} color={colors.text} />
+                  </PressableScale>
+                  <PressableScale
+                    hitSlop={8}
+                    haptic
+                    onPress={() => toast.show({ message: 'Downloading playlist…', icon: 'arrow-down-circle-outline' })}
+                  >
+                    <Ionicons name="arrow-down-circle-outline" size={26} color={colors.text} />
+                  </PressableScale>
+                </View>
+                <View style={styles.actionRight}>
+                  <PressableScale hitSlop={8} haptic onPress={playShuffled}>
+                    <Ionicons name="shuffle" size={26} color={colors.text} />
+                  </PressableScale>
+                  <PressableScale haptic onPress={() => play(0)} style={styles.playFab}>
+                    <Ionicons name="play" size={26} color={colors.black} style={{ marginLeft: 2 }} />
+                  </PressableScale>
+                </View>
               </View>
             ) : null}
             {loading ? (
@@ -158,7 +189,7 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   headerWash: {
     ...StyleSheet.absoluteFillObject,
-    bottom: '55%',
+    bottom: '58%',
   },
   topBar: {
     flexDirection: 'row',
@@ -180,45 +211,50 @@ const styles = StyleSheet.create({
   headerCard: {
     alignItems: 'center',
     paddingTop: spacing.md,
-    paddingBottom: spacing.lg,
+    paddingBottom: spacing.sm,
     paddingHorizontal: spacing.lg,
     gap: spacing.md,
   },
+  artWrap: {
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 12,
+  },
+  art: {},
   title: {
     color: colors.text,
     fontSize: 26,
-    fontWeight: '900',
-    fontFamily: fonts.black,
+    fontWeight: '700',
+    fontFamily: fonts.bold,
     textAlign: 'center',
     letterSpacing: -0.4,
+    marginTop: spacing.sm,
   },
-  sub: { color: colors.textDim, fontSize: 13, fontFamily: fonts.medium },
-  actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xs },
-  playBtn: {
+  sub: { color: colors.textDim, fontSize: 13, fontFamily: fonts.regular },
+  actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    borderRadius: radius.full,
-    paddingHorizontal: spacing.xl,
-    paddingVertical: 12,
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
+    justifyContent: 'space-between',
+    alignSelf: 'stretch',
+    paddingTop: spacing.sm,
+  },
+  actionLeft: { flexDirection: 'row', alignItems: 'center', gap: 20 },
+  actionRight: { flexDirection: 'row', alignItems: 'center', gap: 22 },
+  playFab: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.accentBright, // Spotify CTA green
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
-    elevation: 10,
+    elevation: 8,
   },
-  playBtnText: { fontSize: 15, fontWeight: '800', fontFamily: fonts.extrabold },
-  shuffleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    backgroundColor: colors.glass,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glassBorder,
-    borderRadius: radius.full,
-    paddingHorizontal: spacing.lg + 4,
-    paddingVertical: 12,
-  },
-  shuffleBtnText: { color: colors.text, fontSize: 14, fontWeight: '700', fontFamily: fonts.bold },
   loadingWrap: { alignItems: 'center', gap: spacing.md, paddingVertical: spacing.xl },
   failedText: { color: colors.textDim, fontSize: 13, fontFamily: fonts.regular, textAlign: 'center' },
 });

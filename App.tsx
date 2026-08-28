@@ -18,7 +18,7 @@ import { CollectionScreen } from './src/screens/CollectionScreen';
 import { PlaylistScreen } from './src/screens/PlaylistScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
 import { PlayerScreen } from './src/screens/PlayerScreen';
-import { AmbientBackdrop, DynamicThemeProvider } from './src/theme/DynamicThemeProvider';
+import { DynamicThemeProvider } from './src/theme/DynamicThemeProvider';
 import type { RootStackParamList, TabParamList } from './src/screens/navigation';
 import { colors } from './src/theme';
 
@@ -39,66 +39,49 @@ const navTheme = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<TabParamList>();
 
+/**
+ * Tabs — authentic Spotify Android shell: full-width pure-black bottom bar
+ * (3 tabs), content on #121212, mini player card floating above the bar.
+ */
 function TabsScreen() {
   const insets = useSafeAreaInsets();
-  const tabBarStyle = React.useMemo(
-    () => ({
-      position: 'absolute' as const,
-      backgroundColor: 'rgba(12,13,16,0.94)',
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: colors.glassBorder,
-      height: 62,
-      paddingTop: 8,
-      marginHorizontal: 14,
-      marginBottom: 10 + insets.bottom,
-      borderRadius: 31,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.glassBorder,
-      paddingBottom: 0,
-      shadowColor: '#000',
-      shadowOpacity: 0.45,
-      shadowRadius: 18,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 18,
-    }),
-    [insets.bottom],
-  );
   return (
     <View style={styles.tabsWrap}>
-      {/* ambient canvas — paints the tab area with the current song */}
-      <AmbientBackdrop />
       <Tab.Navigator
         screenOptions={({ route }) => ({
           headerShown: false,
-          // transparent scenes so the ambient palette canvas shows through
-          sceneContainerStyle: { backgroundColor: 'transparent' },
+          sceneContainerStyle: { backgroundColor: colors.bg },
           tabBarActiveTintColor: colors.text,
-          tabBarInactiveTintColor: '#8B8D98',
-          tabBarStyle,
+          tabBarInactiveTintColor: colors.inactiveTab,
+          tabBarStyle: {
+            backgroundColor: colors.bgDeep, // Spotify: pure black bar
+            borderTopWidth: 0,
+            elevation: 0,
+            height: 58,
+            paddingBottom: 6,
+            paddingTop: 4,
+          },
           tabBarLabelStyle: styles.tabLabel,
-          // we position the pill ourselves — disable the navigator's own
-          // bottom inset padding so the capsule stays a true 62px pill
-          safeAreaInsets: { bottom: 0, top: 0, left: 0, right: 0 },
           tabBarIcon: ({ color, focused }) => {
             const icons: Record<string, keyof typeof Ionicons.glyphMap> = {
               Home: focused ? 'home' : 'home-outline',
-              Search: focused ? 'search' : 'search-outline',
-              AI: focused ? 'sparkles' : 'sparkles-outline',
+              Search: 'search',
               Library: focused ? 'library' : 'library-outline',
             };
-            return <Ionicons name={icons[route.name] ?? 'home'} size={21} color={color} />;
+            return <Ionicons name={icons[route.name] ?? 'home'} size={23} color={color} />;
           },
         })}
       >
         <Tab.Screen name="Home" component={HomeScreen} options={{ tabBarLabel: 'Home' }} />
         <Tab.Screen name="Search" component={SearchScreen} options={{ tabBarLabel: 'Search' }} />
-        <Tab.Screen name="AI" component={AIScreen} options={{ tabBarLabel: 'TSF AI' }} />
-        <Tab.Screen name="Library" component={LibraryScreen} options={{ tabBarLabel: 'Your Library' }} />
+        <Tab.Screen
+          name="Library"
+          component={LibraryScreen}
+          options={{ tabBarLabel: 'Your Library' }}
+        />
       </Tab.Navigator>
-      <View
-        style={[styles.miniWrap, { bottom: 82 + insets.bottom }]}
-        pointerEvents="box-none"
-      >
+      {/* Spotify mini player: rounded #282828 card floating above the bar */}
+      <View style={[styles.miniWrap, { bottom: 58 + insets.bottom + 6 }]}>
         <MiniPlayer />
       </View>
     </View>
@@ -153,6 +136,11 @@ export default function App() {
                   options={{ animation: 'slide_from_right' }}
                 />
                 <Stack.Screen
+                  name="AI"
+                  component={AIScreen}
+                  options={{ animation: 'slide_from_right' }}
+                />
+                <Stack.Screen
                   name="Player"
                   component={PlayerScreen}
                   options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
@@ -168,11 +156,11 @@ export default function App() {
 
 const styles = StyleSheet.create({
   tabsWrap: { flex: 1, backgroundColor: colors.bg },
-  tabLabel: { fontSize: 10, fontWeight: '700' },
+  tabLabel: { fontSize: 10, fontFamily: 'Figtree-500', letterSpacing: 0.2 },
   miniWrap: {
     position: 'absolute',
-    left: 10,
-    right: 10,
+    left: 0,
+    right: 0,
     zIndex: 20,
     elevation: 12,
   },

@@ -118,8 +118,13 @@ export function AIScreen() {
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Text style={styles.title}>TSF AI</Text>
-        <Text style={styles.subtitle}>Describe a vibe. Get a playlist.</Text>
+        <PressableScale hitSlop={12} onPress={() => nav.goBack()} style={styles.backBtn}>
+          <Ionicons name="chevron-back" size={26} color={colors.text} />
+        </PressableScale>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>TSF AI</Text>
+          <Text style={styles.subtitle}>Describe a vibe. Get a playlist.</Text>
+        </View>
       </View>
 
       <View style={styles.inputWrap}>
@@ -272,8 +277,9 @@ export function AIScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: 'transparent' },
-  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg + 2, paddingBottom: spacing.md },
+  root: { flex: 1, backgroundColor: colors.bg },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.lg, paddingTop: spacing.lg + 2, paddingBottom: spacing.md },
+  backBtn: { marginRight: 10, paddingVertical: 4 },
   title: {
     color: colors.text,
     fontSize: 26,

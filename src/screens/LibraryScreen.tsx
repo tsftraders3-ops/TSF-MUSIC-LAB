@@ -1,8 +1,11 @@
 /**
- * Library v2 — playlists first, exactly like Spotify:
- *   Your Sound stats card → filter chips (Playlists / Liked / Downloads /
- *   Recent) → rows. Playlists get create + rename + delete, all with
- *   toasts. The stats card deep-links into the listening-stats screen.
+ * Your Library — authentic Spotify Android layout:
+ *   avatar + "Your Library" title, search & add icons right →
+ *   filter chips (Playlists / Artists / Albums / Downloaded) →
+ *   sort row ("Recent" + grid toggle) → list rows: 64px artwork
+ *   (rounded-square playlists, circle artists), 16px bold title,
+ *   13px dim subtitle. Liked Songs leads with the iconic purple→green
+ *   gradient heart tile + green pin.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -19,7 +22,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import type { Playlist, Track } from '../types';
 import { usePlayer } from '../player/PlayerProvider';
 import {
@@ -36,20 +38,30 @@ import { Artwork } from '../components/Artwork';
 import { PressableScale } from '../components/PressableScale';
 import { useToast } from '../components/Toast';
 import { colors, fonts, radius, spacing } from '../theme';
-import { useDynamicPalette } from '../theme/DynamicThemeProvider';
-import { withAlpha } from '../theme/dynamic';
 import type { RootStackParamList } from './navigation';
 
-type Tab = 'playlists' | 'favorites' | 'downloads' | 'recent';
+type Chip = 'playlists' | 'artists' | 'albums' | 'downloaded';
+
+interface LibItem {
+  key: string;
+  title: string;
+  subtitle: string;
+  artwork?: string;
+  seed: string;
+  kind: 'liked' | 'stats' | 'playlist' | 'ai' | 'artist' | 'album' | 'track';
+  playlistId?: string;
+  tracks?: Track[];
+  circle?: boolean;
+}
 
 export function LibraryScreen() {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { playQueue } = usePlayer();
   const toast = useToast();
-  const palette = useDynamicPalette();
 
-  const [tab, setTab] = useState<Tab>('playlists');
+  const [chip, setChip] = useState<Chip>('playlists');
+  const [sortRecent, setSortRecent] = useState(true);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [favorites, setFavorites] = useState<Track[]>([]);
   const [downloads, setDownloads] = useState<Track[]>([]);
@@ -122,151 +134,271 @@ export function LibraryScreen() {
     await reload();
   };
 
-  const totalSongs =
-    favorites.length + downloads.length + playlists.reduce((s, p) => s + p.tracks.length, 0);
+  const openCollection = (title: string, tracks: Track[]) =>
+    nav.navigate('Collection', {
+      collection: { id: `local-${title}`, title, artwork: tracks[0]?.artwork ?? '' },
+      tracks,
+    });
+
+  /* ── build the Spotify-style item list per chip ──────────────────── */
+  const items: LibItem[] = [];
+  if (chip === 'playlists') {
+    items.push({
+      key: 'liked',
+      title: 'Liked Songs',
+      subtitle: `Playlist · ${favorites.length} songs`,
+      seed: 'liked',
+      kind: 'liked',
+      tracks: favorites,
+    });
+    items.push({
+      key: 'stats',
+      title: 'Your Sound',
+      subtitle: 'Your listening stats',
+      seed: 'stats',
+      kind: 'stats',
+    });
+    playlists
+      .slice()
+      .sort((a, b) =>
+        sortRecent
+          ? (b.createdAt ?? 0) - (a.createdAt ?? 0)
+          : a.name.localeCompare(b.name),
+      )
+      .forEach((p) =>
+        items.push({
+          key: p.id,
+          title: p.name,
+          subtitle: `${p.aiGenerated ? 'TSF AI · ' : 'Playlist · '}${p.tracks.length} songs`,
+          artwork: p.tracks[0]?.artwork,
+          seed: p.id,
+          kind: p.aiGenerated ? 'ai' : 'playlist',
+          playlistId: p.id,
+          tracks: p.tracks,
+        }),
+      );
+  } else if (chip === 'artists') {
+    const seen = new Set<string>();
+    [...recents, ...favorites].forEach((t) => {
+      if (seen.has(t.artist)) return;
+      seen.add(t.artist);
+      items.push({
+        key: `artist-${t.artist}`,
+        title: t.artist,
+        subtitle: 'Artist',
+        artwork: t.artwork,
+        seed: t.artist,
+        kind: 'artist',
+        circle: true,
+      });
+    });
+    items.sort((a, b) => a.title.localeCompare(b.title));
+  } else if (chip === 'albums') {
+    const seen = new Set<string>();
+    [...recents, ...favorites].forEach((t) => {
+      const alb = t.album ?? '';
+      if (!alb || seen.has(alb)) return;
+      seen.add(alb);
+      items.push({
+        key: `album-${alb}`,
+        title: alb,
+        subtitle: `Album · ${t.artist}`,
+        artwork: t.artwork,
+        seed: alb,
+        kind: 'album',
+      });
+    });
+    items.sort((a, b) => a.title.localeCompare(b.title));
+  } else {
+    downloads.forEach((t) =>
+      items.push({
+        key: t.id,
+        title: t.title,
+        subtitle: `Song · ${t.artist}`,
+        artwork: t.artwork,
+        seed: t.id,
+        kind: 'track',
+        tracks: [t],
+      }),
+    );
+  }
+
+  const renderItem = ({ item }: { item: LibItem }) => {
+    const onRowPress = () => {
+      if (item.kind === 'liked') return openCollection('Liked Songs', item.tracks ?? []);
+      if (item.kind === 'stats') return nav.navigate('Stats');
+      if (item.playlistId) return nav.navigate('Playlist', { playlistId: item.playlistId });
+      if (item.kind === 'artist')
+        return nav.navigate('Collection', {
+          collection: {
+            id: `artist-${item.title}`,
+            title: item.title,
+            subtitle: 'Artist',
+            artwork: '',
+            kind: 'search',
+            query: item.title,
+          },
+        });
+      if (item.kind === 'album' || item.kind === 'track')
+        return nav.navigate('Collection', {
+          collection: {
+            id: `local-${item.title}`,
+            title: item.title,
+            artwork: item.artwork ?? '',
+          },
+          tracks: item.tracks ?? [],
+        });
+      openCollection(item.title, item.tracks ?? []);
+    };
+    const longPressPlaylist = () => {
+      const pl = playlists.find((p) => p.id === item.playlistId);
+      if (pl) {
+        setMenuFor(pl);
+        setRenameText(pl.name);
+      }
+    };
+    return (
+      <PressableScale
+        haptic
+        scaleTo={0.985}
+        style={styles.row}
+        onPress={onRowPress}
+        onLongPress={longPressPlaylist}
+        delayLongPress={300}
+      >
+        {item.kind === 'liked' ? (
+          <Artwork seed="liked" size={64} liked variant="rounded" />
+        ) : item.kind === 'stats' ? (
+          <View style={styles.statsTile}>
+            <Ionicons name="pulse-outline" size={26} color="#fff" />
+          </View>
+        ) : item.kind === 'ai' ? (
+          <View style={styles.aiTile}>
+            <Ionicons name="sparkles" size={24} color="#fff" />
+          </View>
+        ) : (
+          <Artwork
+            uri={item.artwork}
+            seed={item.seed}
+            size={64}
+            variant={item.circle ? 'circle' : 'rounded'}
+          />
+        )}
+        <View style={{ flex: 1, gap: 3, paddingRight: 8 }}>
+          <Text style={styles.rowTitle} numberOfLines={1}>
+            {item.title}
+          </Text>
+          <View style={styles.rowSubWrap}>
+            {item.kind === 'liked' ? (
+              <Ionicons name="pin" size={14} color={colors.accentBright} />
+            ) : null}
+            <Text style={styles.rowSub} numberOfLines={1}>
+              {item.subtitle}
+            </Text>
+          </View>
+        </View>
+        {item.playlistId ? (
+          <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+        ) : null}
+      </PressableScale>
+    );
+  };
+
+  const emptyCopy: Record<Chip, { title: string; sub: string }> = {
+    playlists: {
+      title: 'Create your first playlist',
+      sub: "It's easy — we'll help you",
+    },
+    artists: { title: 'No artists yet', sub: 'Songs you play will show artists here' },
+    albums: { title: 'No albums yet', sub: 'Music you play will collect here' },
+    downloaded: { title: 'No downloads', sub: 'Download from the player for offline listening' },
+  };
+
+  const showEmpty = chip === 'playlists' ? items.length <= 2 : items.length === 0;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
+      {/* header: avatar + title left · search + add right (Spotify) */}
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Your Library</Text>
-        <View style={{ flexDirection: 'row', gap: 6 }}>
-          <PressableScale
-            hitSlop={6}
-            haptic
-            style={styles.iconBtn}
-            onPress={() => nav.navigate('Stats')}
-          >
-            <Ionicons name="stats-chart-outline" size={21} color={colors.text} />
+        <View style={styles.headerLeft}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>T</Text>
+          </View>
+          <Text style={styles.title}>Your Library</Text>
+        </View>
+        <View style={{ flexDirection: 'row', gap: 4 }}>
+          <PressableScale hitSlop={6} haptic style={styles.iconBtn} onPress={() => toast.show({ message: 'Search your library — coming soon', icon: 'search' })}>
+            <Ionicons name="search" size={22} color={colors.text} />
           </PressableScale>
           <PressableScale hitSlop={6} haptic style={styles.iconBtn} onPress={() => setCreateOpen(true)}>
-            <Ionicons name="add" size={25} color={colors.text} />
+            <Ionicons name="add" size={26} color={colors.text} />
           </PressableScale>
         </View>
       </View>
 
-      {/* Your Sound — stats card, wearing the current song's colors */}
-      <PressableScale
-        haptic
-        onPress={() => nav.navigate('Stats')}
-        style={styles.statsCard}
-      >
-        <LinearGradient
-          colors={[withAlpha(palette.deep, 0.95), withAlpha(palette.vibrant, 0.45)]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={[styles.statsGradient, { borderWidth: StyleSheet.hairlineWidth, borderColor: withAlpha(palette.glow, 0.25) }]}
-        >
-          <View>
-            <Text style={styles.statsTitle}>Your Sound</Text>
-            <Text style={styles.statsSub}>
-              {totalSongs} saved · {recents.length} recently played
-            </Text>
-          </View>
-          <View style={[styles.statsBadge, { backgroundColor: palette.glow }]}>
-            <Ionicons name="chevron-forward" size={18} color="#07080B" />
-          </View>
-        </LinearGradient>
-      </PressableScale>
-
-      <View style={styles.tabs}>
-        {(['playlists', 'favorites', 'downloads', 'recent'] as Tab[]).map((t) => (
+      {/* filter chips (Spotify gray pills) */}
+      <View style={styles.chips}>
+        {(['playlists', 'artists', 'albums', 'downloaded'] as Chip[]).map((t) => (
           <Pressable
             key={t}
-            onPress={() => setTab(t)}
-            style={[styles.tabPill, tab === t && styles.tabPillActive]}
+            onPress={() => setChip(t)}
+            style={[styles.chip, chip === t && styles.chipActive]}
           >
-            <Text style={[styles.tabText, tab === t && styles.tabTextActive]}>
+            <Text style={[styles.chipText, chip === t && styles.chipTextActive]}>
               {t === 'playlists'
-                ? `Playlists ${playlists.length ? playlists.length : ''}`
-                : t === 'favorites'
-                  ? `Liked ${favorites.length ? favorites.length : ''}`
-                  : t === 'downloads'
-                    ? `Downloads ${downloads.length ? downloads.length : ''}`
-                    : 'Recent'}
+                ? 'Playlists'
+                : t === 'artists'
+                  ? 'Artists'
+                  : t === 'albums'
+                    ? 'Albums'
+                    : 'Downloaded'}
             </Text>
           </Pressable>
         ))}
       </View>
 
-      {tab === 'playlists' ? (
-        <FlatList
-          data={playlists}
-          keyExtractor={(p) => p.id}
-          contentContainerStyle={{ paddingBottom: 185, flexGrow: 1 }}
-          ListEmptyComponent={
+      {/* sort row */}
+      <View style={styles.sortRow}>
+        <PressableScale hitSlop={8} haptic onPress={() => setSortRecent((v) => !v)} style={styles.sortBtn}>
+          <Ionicons name="swap-vertical" size={15} color={colors.textDim} />
+          <Text style={styles.sortText}>{sortRecent ? 'Recent' : 'Alphabetical'}</Text>
+          <Ionicons name="chevron-down" size={13} color={colors.textDim} />
+        </PressableScale>
+      </View>
+
+      <FlatList
+        data={items}
+        keyExtractor={(i) => i.key}
+        renderItem={renderItem}
+        contentContainerStyle={{ paddingBottom: 170, flexGrow: 1 }}
+        ListEmptyComponent={
+          chip === 'playlists' ? null : (
             <View style={styles.empty}>
-              <Ionicons name="add-circle-outline" size={48} color={colors.textFaint} />
-              <Text style={styles.emptyTitle}>No playlists yet</Text>
-              <Text style={styles.emptySub}>
-                Tap + to create one, or let TSF AI generate a mix for you
-              </Text>
+              <Ionicons
+                name={chip === 'downloaded' ? 'arrow-down-circle-outline' : 'musical-notes-outline'}
+                size={48}
+                color={colors.textFaint}
+              />
+              <Text style={styles.emptyTitle}>{emptyCopy[chip].title}</Text>
+              <Text style={styles.emptySub}>{emptyCopy[chip].sub}</Text>
             </View>
-          }
-          ListHeaderComponent={
-            playlists.length ? (
-              <PressableScale
-                haptic
-                style={styles.createRow}
-                onPress={() => setCreateOpen(true)}
-              >
-                <View style={styles.createIcon}>
-                  <Ionicons name="add" size={24} color={colors.text} />
-                </View>
-                <View style={{ gap: 2 }}>
-                  <Text style={styles.createTitle}>New playlist</Text>
-                  <Text style={styles.createSub}>Build your own collection</Text>
-                </View>
-              </PressableScale>
-            ) : null
-          }
-          renderItem={({ item }) => (
-            <PressableScale
-              haptic
-              style={styles.playlistRow}
-              onLongPress={() => {
-                setMenuFor(item);
-                setRenameText(item.name);
-              }}
-              delayLongPress={300}
-              onPress={() => nav.navigate('Playlist', { playlistId: item.id })}
-            >
-              {item.aiGenerated ? (
-                <View style={styles.playlistArtFallback}>
-                  <LinearGradient
-                    colors={[colors.aiStart, colors.aiEnd]}
-                    style={styles.playlistGradient}
-                  >
-                    <Ionicons name="sparkles" size={22} color="#fff" />
-                  </LinearGradient>
-                </View>
-              ) : (
-                <Artwork
-                  uri={item.tracks[0]?.artwork}
-                  seed={item.id}
-                  size={62}
-                  variant="rounded"
-                />
-              )}
-              <View style={{ flex: 1, gap: 3 }}>
-                <Text style={styles.playlistName} numberOfLines={1}>
-                  {item.name}
-                </Text>
-                <Text style={styles.playlistMeta} numberOfLines={1}>
-                  {item.aiGenerated ? 'TSF AI · ' : 'Playlist · '}
-                  {item.tracks.length} songs
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
-            </PressableScale>
-          )}
-        />
-      ) : (
-        <TrackTabList
-          tracks={tab === 'favorites' ? favorites : tab === 'downloads' ? downloads : recents}
-          tab={tab}
-          onPlay={playTracks}
-        />
-      )}
+          )
+        }
+      />
+
+      {showEmpty && chip === 'playlists' ? (
+        <View style={styles.emptyOverlay}>
+          <Text style={styles.emptyTitle}>{emptyCopy.playlists.title}</Text>
+          <Text style={styles.emptySub}>{emptyCopy.playlists.sub}</Text>
+          <PressableScale
+            haptic
+            onPress={() => setCreateOpen(true)}
+            style={styles.emptyCreateBtn}
+          >
+            <Text style={styles.emptyCreateText}>Create</Text>
+          </PressableScale>
+        </View>
+      ) : null}
 
       {/* Create playlist modal */}
       <Modal visible={createOpen} transparent animationType="fade" onRequestClose={() => setCreateOpen(false)}>
@@ -346,184 +478,129 @@ export function LibraryScreen() {
   );
 }
 
-function TrackTabList({
-  tracks,
-  tab,
-  onPlay,
-}: {
-  tracks: Track[];
-  tab: Tab;
-  onPlay: (list: Track[], index?: number) => void;
-}) {
-  if (!tracks.length) {
-    const icon =
-      tab === 'favorites' ? 'heart-outline' : tab === 'downloads' ? 'arrow-down-circle-outline' : 'time-outline';
-    const title =
-      tab === 'favorites' ? 'No liked songs' : tab === 'downloads' ? 'No downloads' : 'Nothing played yet';
-    const sub =
-      tab === 'favorites'
-        ? 'Tap the heart on any song to save it here'
-        : tab === 'downloads'
-          ? 'Download from the player for offline listening'
-          : 'Songs you play will show up here';
-    return (
-      <View style={styles.empty}>
-        <Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={48} color={colors.textFaint} />
-        <Text style={styles.emptyTitle}>{title}</Text>
-        <Text style={styles.emptySub}>{sub}</Text>
-      </View>
-    );
-  }
-  return (
-    <FlatList
-      data={tracks}
-      keyExtractor={(t) => t.id}
-      contentContainerStyle={{ paddingBottom: 185 }}
-      renderItem={({ item, index }) => (
-        <TrackRow track={item} onPress={() => onPlay(tracks, index)} />
-      )}
-    />
-  );
-}
-
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: 'transparent' },
+  root: { flex: 1, backgroundColor: colors.bg },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg + 2,
-    paddingBottom: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm + 2,
   },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  avatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.elevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: { color: colors.text, fontSize: 15, fontWeight: '800', fontFamily: fonts.extrabold },
   title: {
     color: colors.text,
-    fontSize: 25,
-    fontWeight: '900',
-    fontFamily: fonts.black,
-    letterSpacing: -0.4,
+    fontSize: 22,
+    fontWeight: '700',
+    fontFamily: fonts.bold,
+    letterSpacing: -0.3,
   },
   iconBtn: {
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: colors.glassStrong,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glassBorder,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  statsCard: {
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.md,
-    borderRadius: radius.squircle,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.3,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
-  },
-  statsGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: spacing.lg + 2,
-    borderRadius: radius.squircle,
-  },
-  statsBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  statsTitle: { color: '#fff', fontSize: 18, fontWeight: '900', fontFamily: fonts.black },
-  statsSub: { color: 'rgba(255,255,255,0.85)', fontSize: 12.5, fontFamily: fonts.medium, marginTop: 2 },
-  tabs: {
+  chips: {
     flexDirection: 'row',
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
-    marginBottom: spacing.md,
-    flexWrap: 'wrap',
+    marginBottom: spacing.sm + 2,
   },
-  tabPill: {
+  chip: {
     borderRadius: radius.full,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+    backgroundColor: colors.card, // Spotify chip gray
+  },
+  chipActive: { backgroundColor: colors.accentBright },
+  chipText: { color: colors.text, fontSize: 13, fontWeight: '600', fontFamily: fonts.semibold },
+  chipTextActive: { color: colors.accentDeep },
+  sortRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+  },
+  sortBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4 },
+  sortText: { color: colors.textDim, fontSize: 13, fontFamily: fonts.medium },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingVertical: 8,
-    backgroundColor: colors.glass,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glassBorder,
-  },
-  tabPillActive: { backgroundColor: colors.accent },
-  tabText: { color: colors.textDim, fontSize: 13, fontWeight: '700', fontFamily: fonts.bold },
-  tabTextActive: { color: colors.accentDeep },
-  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, padding: spacing.xxl },
-  emptyTitle: { color: colors.text, fontSize: 18, fontWeight: '800', fontFamily: fonts.extrabold },
-  emptySub: { color: colors.textDim, fontSize: 13, textAlign: 'center', fontFamily: fonts.regular },
-  createRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: 10,
-  },
-  createIcon: {
-    width: 62,
-    height: 62,
-    borderRadius: radius.md,
-    backgroundColor: colors.glassStrong,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glassBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  createTitle: { color: colors.text, fontSize: 16, fontWeight: '700', fontFamily: fonts.bold },
-  createSub: { color: colors.textDim, fontSize: 13, fontFamily: fonts.regular },
-  playlistRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: 9,
     minHeight: 78,
   },
-  playlistArtFallback: { borderRadius: radius.md, overflow: 'hidden' },
-  playlistGradient: {
-    width: 62,
-    height: 62,
+  rowTitle: { color: colors.text, fontSize: 16, fontWeight: '500', fontFamily: fonts.medium },
+  rowSubWrap: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  rowSub: { color: colors.textDim, fontSize: 13, fontFamily: fonts.regular, flexShrink: 1 },
+  statsTile: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.sm,
+    backgroundColor: '#535353',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  playlistName: { color: colors.text, fontSize: 16, fontWeight: '600', fontFamily: fonts.semibold },
-  playlistMeta: { color: colors.textDim, fontSize: 13, fontFamily: fonts.regular },
+  aiTile: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.sm,
+    backgroundColor: colors.aiStart,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, padding: spacing.xxl },
+  emptyOverlay: { alignItems: 'center', gap: spacing.sm, padding: spacing.xxl, paddingTop: spacing.xxl + 20 },
+  emptyTitle: { color: colors.text, fontSize: 18, fontWeight: '700', fontFamily: fonts.bold },
+  emptySub: { color: colors.textDim, fontSize: 13, fontFamily: fonts.regular },
+  emptyCreateBtn: {
+    backgroundColor: colors.accentBright,
+    borderRadius: radius.full,
+    paddingHorizontal: 30,
+    paddingVertical: 10,
+    marginTop: 10,
+  },
+  emptyCreateText: { color: colors.accentDeep, fontSize: 15, fontWeight: '700', fontFamily: fonts.bold },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.65)',
+    backgroundColor: colors.overlay,
     alignItems: 'center',
     justifyContent: 'center',
     padding: spacing.xl,
   },
   dialog: {
     width: '100%',
-    backgroundColor: colors.card,
+    backgroundColor: colors.elevated,
     borderRadius: radius.xl,
     padding: spacing.xl,
   },
-  dialogTitle: { color: colors.text, fontSize: 19, fontWeight: '800', fontFamily: fonts.extrabold },
+  dialogTitle: { color: colors.text, fontSize: 19, fontWeight: '700', fontFamily: fonts.bold },
   dialogInput: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
+    backgroundColor: colors.card,
+    borderRadius: radius.sm + 2,
     color: colors.text,
     fontSize: 15,
-    fontFamily: fonts.medium,
+    fontFamily: fonts.regular,
     paddingHorizontal: spacing.md,
     marginTop: spacing.lg,
     height: 46,
   },
   dialogCancel: {
     flex: 1,
-    backgroundColor: colors.elevated,
+    backgroundColor: colors.card,
     borderRadius: radius.full,
     alignItems: 'center',
     paddingVertical: 12,
@@ -531,32 +608,30 @@ const styles = StyleSheet.create({
   dialogCancelText: { color: colors.text, fontSize: 14, fontWeight: '700', fontFamily: fonts.bold },
   dialogCreate: {
     flex: 1,
-    backgroundColor: colors.accent,
+    backgroundColor: colors.accentBright,
     borderRadius: radius.full,
     alignItems: 'center',
     paddingVertical: 12,
   },
-  dialogCreateText: { color: colors.accentDeep, fontSize: 14, fontWeight: '800', fontFamily: fonts.extrabold },
+  dialogCreateText: { color: colors.accentDeep, fontSize: 14, fontWeight: '700', fontFamily: fonts.bold },
   sheet: {
     position: 'absolute',
     left: spacing.lg,
     right: spacing.lg,
     bottom: spacing.xl,
-    backgroundColor: colors.card,
+    backgroundColor: colors.elevated,
     borderRadius: radius.xl,
     paddingVertical: spacing.sm,
     overflow: 'hidden',
   },
   sheetTitle: {
-    color: colors.textDim,
-    fontSize: 12,
+    color: colors.text,
+    fontSize: 16,
     fontWeight: '700',
     fontFamily: fonts.bold,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   sheetAction: {
     flexDirection: 'row',
@@ -567,5 +642,5 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.border,
   },
-  sheetActionText: { color: colors.text, fontSize: 15, fontWeight: '600', fontFamily: fonts.semibold },
+  sheetActionText: { color: colors.text, fontSize: 15, fontWeight: '500', fontFamily: fonts.medium },
 });

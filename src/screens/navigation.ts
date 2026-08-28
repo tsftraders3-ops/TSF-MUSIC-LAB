@@ -7,11 +7,11 @@ export type RootStackParamList = {
   Collection: { collection: Collection; tracks?: Track[] };
   Playlist: { playlistId: string };
   Stats: undefined;
+  AI: undefined;
 };
 
 export type TabParamList = {
   Home: undefined;
   Search: undefined;
-  AI: undefined;
   Library: undefined;
 };

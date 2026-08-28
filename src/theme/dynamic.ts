@@ -74,6 +74,20 @@ export function mixHex(a: string, b: string, t: number): string {
   return hex(A.r + (B.r - A.r) * t, A.g + (B.g - A.g) * t, A.b + (B.b - A.b) * t);
 }
 
+/**
+ * Spotify's player-gradient top color: the artwork hue with a
+ * saturation/lightness floor so the wash always reads vivid (like
+ * Spotify's extracted-color player background).
+ */
+export function boostForPlayer(color: string): string {
+  const { r, g, b } = rgbFromHex(color);
+  const { h, s, l } = rgbToHsl(r, g, b);
+  const s2 = Math.max(s, 0.55);
+  const l2 = clamp(l, 0.42, 0.6);
+  const out = hslToRgb(h, s2, l2);
+  return hex(out.r, out.g, out.b);
+}
+
 /* ── HSL art-direction ──────────────────────────────────────────────── */
 
 interface HSL {

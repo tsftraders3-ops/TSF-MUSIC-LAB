@@ -1,10 +1,10 @@
 /**
- * Home v2 — the full Spotify home architecture:
+ * Home — authentic Spotify Android home architecture:
  *
- *   greeting header → quick-shortcut grid → Made For You (AI Daily Mixes
- *   + create-with-AI card) → Jump back in (recents) → Trending now
- *   (safety-filtered) → Because you listened (artist radios) →
- *   Popular charts.
+ *   filter chips (All / Music / AI — green active) + profile avatar →
+ *   2-column quick-shortcut grid (#2A2A2A tiles) → Made for you (AI Daily
+ *   Mixes + create-with-AI card) → Jump back in (recents) → Trending now
+ *   (safety-filtered) → Because you listened (artist radios) → charts.
  *
  * Everything algorithmic passes the content-safety filter, so nothing
  * explicit ever lands on this screen uninvited.
@@ -23,7 +23,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import type { Collection, DailyMix, Track } from '../types';
 import {
   collectionIsClean,
@@ -35,23 +34,18 @@ import { getBecauseYouListened, getDailyMixes } from '../ai/engine';
 import { getChartsCache, getFavorites, getRecents, setChartsCache } from '../storage/store';
 import { usePlayer } from '../player/PlayerProvider';
 import { QuickTile, Shelf, ShelfCard } from '../components/Shelf';
-import { Artwork } from '../components/Artwork';
 import { ShelfSkeleton } from '../components/ShelfSkeleton';
 import { PressableScale } from '../components/PressableScale';
 import { colors, fonts, radius, spacing } from '../theme';
-import { useTrackPalette } from '../theme/DynamicThemeProvider';
-import { withAlpha } from '../theme/dynamic';
 import type { RootStackParamList } from './navigation';
 
-interface ChartShelf {
-  collection: Collection;
-  tracks: Track[];
-}
+type Chip = 'all' | 'music' | 'ai';
 
 export function HomeScreen() {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { playQueue } = usePlayer();
+  const [chip, setChip] = useState<Chip>('all');
 
   const [mixes, setMixes] = useState<DailyMix[] | null>(null);
   const [trending, setTrending] = useState<Track[] | null>(null);
@@ -129,18 +123,14 @@ export function HomeScreen() {
     load();
   }, [load]);
 
-  const hour = new Date().getHours();
-  const greeting =
-    hour < 5 ? 'Late night' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-
   const hasMixes = !!mixes && mixes.length > 0;
   const loading = mixes === null && trending === null;
-  const heroMix = hasMixes ? mixes![0] : null;
+  const showAI = chip !== 'music'; // AI surfaces under All + AI chips
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 195 }}
+        contentContainerStyle={{ paddingBottom: 170 }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -154,8 +144,31 @@ export function HomeScreen() {
           />
         }
       >
+        {/* ── Header: filter chips + profile avatar (Spotify layout) ── */}
         <View style={styles.header}>
-          <Text style={styles.greeting}>{greeting}</Text>
+          <View style={styles.chipRow}>
+            {(['all', 'music', 'ai'] as Chip[]).map((c) => (
+              <PressableScale
+                key={c}
+                scaleTo={0.94}
+                haptic
+                onPress={() => setChip(c)}
+                style={[styles.chip, chip === c && styles.chipActive]}
+              >
+                <Text style={[styles.chipText, chip === c && styles.chipTextActive]}>
+                  {c === 'all' ? 'All' : c === 'music' ? 'Music' : 'AI'}
+                </Text>
+              </PressableScale>
+            ))}
+          </View>
+          <PressableScale
+            scaleTo={0.92}
+            haptic
+            onPress={() => nav.navigate('Stats')}
+            style={styles.avatar}
+          >
+            <Text style={styles.avatarText}>T</Text>
+          </PressableScale>
         </View>
 
         {offline ? (
@@ -165,9 +178,19 @@ export function HomeScreen() {
           </View>
         ) : null}
 
-        {/* ── Quick shortcuts ─────────────────────────────────────────── */}
+        {/* ── Quick shortcuts — Spotify #2A2A2A tiles ─────────────────── */}
         {(favorites.length > 0 || recents.length > 0 || hasMixes) && (
           <View style={styles.quickGrid}>
+            {favorites.length > 0 ? (
+              <QuickTile
+                title="Liked Songs"
+                subtitle={`Playlist · ${favorites.length} songs`}
+                seed="liked-songs"
+                width={quickTileWidth()}
+                onPress={() => openTrackCollection('Liked Songs', favorites)}
+                liked
+              />
+            ) : null}
             {hasMixes ? (
               <QuickTile
                 title="Daily Mix 1"
@@ -177,18 +200,10 @@ export function HomeScreen() {
                 onPress={() => openTrackCollection('Daily Mix 1', mixes![0].tracks)}
               />
             ) : null}
-            {favorites.length > 0 ? (
-              <QuickTile
-                title="Liked Songs"
-                seed="liked-songs"
-                width={quickTileWidth()}
-                onPress={() => openTrackCollection('Liked Songs', favorites)}
-                icon="heart"
-              />
-            ) : null}
             {trending && trending.length > 0 ? (
               <QuickTile
                 title="Trending now"
+                subtitle="Hot hits right now"
                 artwork={trending[0].artwork}
                 seed="trending"
                 width={quickTileWidth()}
@@ -207,15 +222,12 @@ export function HomeScreen() {
           </View>
         )}
 
-        {/* ── Hero — your first Daily Mix, tinted by its own artwork ─── */}
-        {heroMix ? <HeroMixCard mix={heroMix} onPress={() => openTrackCollection(heroMix.title, heroMix.tracks)} /> : null}
-
         {loading ? (
           <ShelfSkeleton />
         ) : (
           <>
-            {/* ── Made for you (AI) ──────────────────────────────────── */}
-            {hasMixes ? (
+            {/* ── Made for you (AI Daily Mixes) ───────────────────────── */}
+            {hasMixes && showAI ? (
               <Shelf title="Made for you">
                 {mixes!.map((mix) => (
                   <ShelfCard
@@ -225,11 +237,10 @@ export function HomeScreen() {
                     artwork={mix.artwork}
                     seed={mix.id}
                     size={150}
-                    round={false}
                     onPress={() => openTrackCollection(mix.title, mix.tracks)}
                   />
                 ))}
-                <AICreateCard onPress={() => nav.navigate('Tabs', { screen: 'AI' })} />
+                <AICreateCard onPress={() => nav.navigate('AI')} />
               </Shelf>
             ) : null}
 
@@ -244,7 +255,6 @@ export function HomeScreen() {
                     artwork={t.artwork}
                     seed={t.id}
                     size={150}
-                    round={false}
                     onPress={() => play(recents, Math.max(0, recents.findIndex((r) => r.id === t.id)))}
                   />
                 ))}
@@ -255,7 +265,7 @@ export function HomeScreen() {
             {trending && trending.length > 0 ? (
               <Shelf
                 title="Trending now"
-                actionLabel="See all"
+                actionLabel="Show all"
                 onAction={() => openTrackCollection('Trending now', trending)}
               >
                 {trending.slice(0, 10).map((t) => (
@@ -266,7 +276,6 @@ export function HomeScreen() {
                     artwork={t.artwork}
                     seed={t.id}
                     size={150}
-                    round={false}
                     onPress={() => play(trending, Math.max(0, trending.findIndex((x) => x.id === t.id)))}
                   />
                 ))}
@@ -305,7 +314,6 @@ export function HomeScreen() {
                     artwork={c.artwork}
                     seed={c.id}
                     size={150}
-                    round={false}
                     onPress={() => nav.navigate('Collection', { collection: c })}
                   />
                 ))}
@@ -313,7 +321,7 @@ export function HomeScreen() {
             ) : null}
 
             {!hasMixes && recents.length === 0 && (!trending || trending.length === 0) ? (
-              <EmptyHome onGoAI={() => nav.navigate('Tabs', { screen: 'AI' })} />
+              <EmptyHome onGoAI={() => nav.navigate('AI')} />
             ) : null}
           </>
         )}
@@ -331,22 +339,19 @@ function quickTileWidth(): number {
   return Math.floor((globalWidth - 32 - 8) / 2);
 }
 
-/** Artist radio card — gradient panel that opens a search collection. */
+/** Artist radio card — opens a search collection (Spotify artist-card style). */
 function ArtistRadioCard({ artist, onPress }: { artist: string; onPress: () => void }) {
   return (
-    <PressableScale onPress={onPress} haptic style={styles.artistCard}>
-      <LinearGradient
-        colors={[colors.aiStart, colors.aiMid, colors.aiEnd]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.artistGradient}
-      >
-        <Ionicons name="radio-outline" size={22} color="rgba(255,255,255,0.9)" />
+    <PressableScale onPress={onPress} haptic style={{ width: 150, gap: 8 }}>
+      <View style={styles.artistCard}>
+        <Ionicons name="radio-outline" size={26} color={colors.textDim} />
+      </View>
+      <View style={{ gap: 2 }}>
         <Text style={styles.artistName} numberOfLines={2}>
           {artist}
         </Text>
         <Text style={styles.artistSub}>Artist radio</Text>
-      </LinearGradient>
+      </View>
     </PressableScale>
   );
 }
@@ -354,57 +359,14 @@ function ArtistRadioCard({ artist, onPress }: { artist: string; onPress: () => v
 /** The "create with AI" card capping the Made-for-you rail. */
 function AICreateCard({ onPress }: { onPress: () => void }) {
   return (
-    <PressableScale onPress={onPress} haptic style={{ width: 150, gap: 10 }}>
-      <LinearGradient
-        colors={['#7C4DFF', '#4D6BFF', '#00E5FF']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.aiCard}
-      >
-        <Ionicons name="sparkles" size={34} color="rgba(255,255,255,0.95)" />
-        <Text style={styles.aiCardTitle}>Create with AI</Text>
-      </LinearGradient>
-      <View style={{ gap: 1 }}>
-        <Text style={styles.aiCardSub}>Describe your vibe, get a playlist</Text>
+    <PressableScale onPress={onPress} haptic style={{ width: 150, gap: 8 }}>
+      <View style={styles.aiCard}>
+        <Ionicons name="sparkles" size={30} color="#fff" />
       </View>
-    </PressableScale>
-  );
-}
-
-/**
- * HeroMixCard — the big lead card (inspo 5): a squircle tinted by the
- * mix's OWN artwork palette with a floating play FAB. Each day's mix
- * paints the hero differently.
- */
-function HeroMixCard({ mix, onPress }: { mix: DailyMix; onPress: () => void }) {
-  const palette = useTrackPalette(mix.artwork, mix.id);
-  return (
-    <PressableScale onPress={onPress} haptic style={styles.heroWrap}>
-      <LinearGradient
-        colors={[withAlpha(palette.deep, 0.92), withAlpha(palette.vibrant, 0.34)]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.heroCard, { borderColor: withAlpha(palette.glow, 0.22) }]}
-      >
-        <Artwork uri={mix.artwork} seed={mix.id} size={78} variant="rounded" style={styles.heroArt} />
-        <View style={styles.heroMeta}>
-          <Text style={styles.heroKicker}>Made for you</Text>
-          <Text style={styles.heroTitle} numberOfLines={1}>
-            {mix.title}
-          </Text>
-          <Text style={styles.heroSub} numberOfLines={1}>
-            {mix.subtitle}
-          </Text>
-        </View>
-        <View
-          style={[
-            styles.heroPlay,
-            { backgroundColor: palette.glow, shadowColor: palette.glow },
-          ]}
-        >
-          <Ionicons name="play" size={24} color="#07080B" />
-        </View>
-      </LinearGradient>
+      <View style={{ gap: 2 }}>
+        <Text style={styles.aiCardTitle}>Create with AI</Text>
+        <Text style={styles.aiCardSub}>Describe your vibe</Text>
+      </View>
     </PressableScale>
   );
 }
@@ -427,20 +389,39 @@ function EmptyHome({ onGoAI }: { onGoAI: () => void }) {
 }
 
 const styles = StyleSheet.create({
-  // transparent so the ambient backdrop (current song's palette) shows
-  root: { flex: 1, backgroundColor: 'transparent' },
+  root: { flex: 1, backgroundColor: colors.bg },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg + 2,
-    paddingBottom: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
   },
-  greeting: {
+  chipRow: { flexDirection: 'row', gap: 8 },
+  chip: {
+    backgroundColor: colors.card, // #242424 — Spotify inactive chip
+    borderRadius: radius.full,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  chipActive: { backgroundColor: colors.accent }, // green — verified in reference
+  chipText: {
     color: colors.text,
-    fontSize: 25,
-    fontWeight: '800',
-    fontFamily: fonts.extrabold,
-    letterSpacing: -0.4,
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: fonts.bold,
   },
+  chipTextActive: { color: colors.accentDeep }, // black on green
+  avatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#535353',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: { color: colors.text, fontSize: 15, fontWeight: '800', fontFamily: fonts.extrabold },
   offlineChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -459,101 +440,39 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
     paddingHorizontal: spacing.lg,
-    marginBottom: spacing.xl,
+    marginBottom: spacing.lg,
   },
-  heroWrap: {
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.xl,
-    borderRadius: radius.squircle,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 10,
-  },
-  heroCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md + 2,
-    padding: spacing.lg,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.squircle,
-  },
-  heroArt: { borderRadius: 14 },
-  heroMeta: { flex: 1, gap: 2 },
-  heroKicker: {
-    color: 'rgba(255,255,255,0.55)',
-    fontSize: 10,
-    fontWeight: '800',
-    fontFamily: fonts.extrabold,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-  },
-  heroTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: '800',
-    fontFamily: fonts.extrabold,
-    letterSpacing: -0.3,
-  },
-  heroSub: {
-    color: colors.textDim,
-    fontSize: 12.5,
-    fontFamily: fonts.medium,
-    marginTop: 2,
-  },
-  heroPlay: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+  artistCard: {
+    width: 150,
+    height: 150,
+    borderRadius: 100,
+    backgroundColor: colors.elevated,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowOpacity: 0.6,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 10,
-  },
-  artistCard: { width: 150, height: 150, borderRadius: radius.squircle, overflow: 'hidden' },
-  artistGradient: {
-    width: '100%',
-    height: '100%',
-    padding: spacing.md,
-    justifyContent: 'space-between',
   },
   artistName: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '800',
-    fontFamily: fonts.extrabold,
-    lineHeight: 20,
+    color: colors.text,
+    fontSize: 13.5,
+    fontWeight: '700',
+    fontFamily: fonts.bold,
+    lineHeight: 17,
   },
-  artistSub: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 11,
-    fontWeight: '600',
-    fontFamily: fonts.semibold,
-  },
+  artistSub: { color: colors.textDim, fontSize: 13, fontFamily: fonts.regular },
   aiCard: {
     width: 150,
     height: 150,
-    borderRadius: radius.squircle,
+    borderRadius: radius.lg,
+    backgroundColor: colors.aiStart,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
   },
   aiCardTitle: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '800',
-    fontFamily: fonts.extrabold,
+    color: colors.text,
+    fontSize: 13.5,
+    fontWeight: '700',
+    fontFamily: fonts.bold,
   },
-  aiCardSub: {
-    color: colors.textDim,
-    fontSize: 12,
-    fontFamily: fonts.regular,
-    lineHeight: 15,
-  },
+  aiCardSub: { color: colors.textDim, fontSize: 13, fontFamily: fonts.regular },
   empty: {
     alignItems: 'center',
     gap: spacing.md,
