@@ -1,11 +1,12 @@
 /**
- * On-device persistence — favorites, play history, recent searches,
- * download index and home cache. Everything lives in AsyncStorage;
- * downloaded audio files live in the app's document directory.
+ * On-device persistence — favorites, play history + counts, recent
+ * searches, playlists, download index, home cache, settings.
+ * Everything lives in AsyncStorage; downloaded audio files live in the
+ * app's document directory (storage/downloads.ts).
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Track } from '../types';
+import type { DailyMix, ListeningStats, PlayCountEntry, Playlist, Track } from '../types';
 
 const KEYS = {
   favorites: 'tsf.favorites.v1',
@@ -13,6 +14,11 @@ const KEYS = {
   searches: 'tsf.recentSearches.v1',
   downloads: 'tsf.downloads.v1',
   chartsCache: 'tsf.chartsCache.v1',
+  playlists: 'tsf.playlists.v1',
+  playCounts: 'tsf.playCounts.v1',
+  dailyMixes: 'tsf.dailyMixes.v1',
+  autoplay: 'tsf.autoplay.v1',
+  smartShuffle: 'tsf.smartShuffle.v1',
 };
 
 async function readJSON<T>(key: string, fallback: T): Promise<T> {
@@ -32,12 +38,6 @@ async function writeJSON(key: string, value: unknown): Promise<void> {
   }
 }
 
-// ── Favorites ──────────────────────────────────────────────────────────
-
-export async function getFavorites(): Promise<Track[]> {
-  return readJSON<Track[]>(KEYS.favorites, []);
-}
-
 let writeChain: Promise<unknown> = Promise.resolve();
 
 /** Serialize a storage mutation so rapid taps can't clobber each other. */
@@ -45,6 +45,12 @@ function serialized<T>(job: () => Promise<T>): Promise<T> {
   const run = writeChain.then(job, job);
   writeChain = run.catch(() => undefined);
   return run;
+}
+
+// ── Favorites ──────────────────────────────────────────────────────────
+
+export async function getFavorites(): Promise<Track[]> {
+  return readJSON<Track[]>(KEYS.favorites, []);
 }
 
 export async function toggleFavorite(track: Track): Promise<boolean> {
@@ -84,6 +90,67 @@ export async function pushRecent(track: Track): Promise<void> {
   });
 }
 
+// ── Play counts + stats ────────────────────────────────────────────────
+
+export async function getPlayCounts(): Promise<Record<string, PlayCountEntry>> {
+  return readJSON<Record<string, PlayCountEntry>>(KEYS.playCounts, {});
+}
+
+export async function incrementPlayCount(track: Track): Promise<void> {
+  return serialized(async () => {
+    const all = await getPlayCounts();
+    const entry = all[track.id];
+    if (entry) {
+      entry.count += 1;
+      entry.lastAt = Date.now();
+    } else {
+      all[track.id] = { track, count: 1, lastAt: Date.now() };
+    }
+    // Cap stored entries to keep AsyncStorage lean.
+    const ids = Object.keys(all);
+    if (ids.length > 300) {
+      ids
+        .sort((a, b) => (all[a]?.lastAt ?? 0) - (all[b]?.lastAt ?? 0))
+        .slice(0, ids.length - 300)
+        .forEach((id) => delete all[id]);
+    }
+    await writeJSON(KEYS.playCounts, all);
+  });
+}
+
+export async function getStats(): Promise<ListeningStats> {
+  const counts = await getPlayCounts();
+  const entries = Object.values(counts);
+  const artistAgg = new Map<string, { plays: number; artwork?: string }>();
+  for (const e of entries) {
+    const key = e.track.artist;
+    const cur = artistAgg.get(key) ?? { plays: 0 };
+    cur.plays += e.count;
+    if (!cur.artwork && e.track.artwork) cur.artwork = e.track.artwork;
+    artistAgg.set(key, cur);
+  }
+  const topArtists = [...artistAgg.entries()]
+    .map(([artist, v]) => ({ artist, plays: v.plays, artwork: v.artwork }))
+    .sort((a, b) => b.plays - a.plays)
+    .slice(0, 8);
+  const topTracks = entries
+    .slice()
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+  const totalPlays = entries.reduce((sum, e) => sum + e.count, 0);
+  const secondsEstimate = entries.reduce(
+    (sum, e) => sum + e.count * (e.track.duration || 210),
+    0,
+  );
+  return {
+    totalPlays,
+    distinctTracks: entries.length,
+    topArtists,
+    topTracks,
+    minutesEstimate: Math.round(secondsEstimate / 60),
+  };
+}
+
 // ── Recent searches ────────────────────────────────────────────────────
 
 export async function getRecentSearches(): Promise<string[]> {
@@ -101,6 +168,72 @@ export async function pushRecentSearch(query: string): Promise<void> {
 
 export async function clearRecentSearches(): Promise<void> {
   await writeJSON(KEYS.searches, []);
+}
+
+// ── Playlists ──────────────────────────────────────────────────────────
+
+export async function getPlaylists(): Promise<Playlist[]> {
+  return readJSON<Playlist[]>(KEYS.playlists, []);
+}
+
+export async function savePlaylists(list: Playlist[]): Promise<void> {
+  await writeJSON(KEYS.playlists, list);
+}
+
+export async function createPlaylist(name: string, tracks: Track[] = []): Promise<Playlist> {
+  const playlist: Playlist = {
+    id: `pl-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+    name: name.trim() || 'New Playlist',
+    createdAt: Date.now(),
+    tracks,
+  };
+  await serialized(async () => {
+    const list = await getPlaylists();
+    list.unshift(playlist);
+    await savePlaylists(list);
+  });
+  return playlist;
+}
+
+export async function renamePlaylist(id: string, name: string): Promise<void> {
+  await serialized(async () => {
+    const list = await getPlaylists();
+    const pl = list.find((p) => p.id === id);
+    if (pl) {
+      pl.name = name.trim() || pl.name;
+      await savePlaylists(list);
+    }
+  });
+}
+
+export async function deletePlaylist(id: string): Promise<void> {
+  await serialized(async () => {
+    const list = await getPlaylists();
+    await savePlaylists(list.filter((p) => p.id !== id));
+  });
+}
+
+export async function addTrackToPlaylist(playlistId: string, track: Track): Promise<boolean> {
+  return serialized(async () => {
+    const list = await getPlaylists();
+    const pl = list.find((p) => p.id === playlistId);
+    if (!pl) return false;
+    if (pl.tracks.some((t) => t.id === track.id)) return true;
+    pl.tracks.push(track);
+    await savePlaylists(list);
+    return true;
+  });
+}
+
+export async function removeTrackFromPlaylist(playlistId: string, trackId: string): Promise<void> {
+  await serialized(async () => {
+    const list = await getPlaylists();
+    const pl = list.find((p) => p.id === playlistId);
+    if (pl) {
+      pl.tracks = pl.tracks.filter((t) => t.id !== trackId);
+      await savePlaylists(list);
+    }
+  });
 }
 
 // ── Downloads index (files managed by storage/downloads.ts) ────────────
@@ -136,4 +269,41 @@ export async function getChartsCache(allowStale = false) {
 
 export async function setChartsCache(shelves: ChartsCache['shelves']): Promise<void> {
   await writeJSON(KEYS.chartsCache, { at: Date.now(), shelves });
+}
+
+// ── Daily mixes cache (regenerated once per day) ───────────────────────
+
+interface DailyMixCache {
+  date: string;
+  mixes: DailyMix[];
+}
+
+export async function getDailyMixCache(): Promise<DailyMix[] | null> {
+  const cache = await readJSON<DailyMixCache | null>(KEYS.dailyMixes, null);
+  if (!cache) return null;
+  const today = new Date().toDateString();
+  return cache.date === today && cache.mixes.length ? cache.mixes : null;
+}
+
+export async function setDailyMixCache(mixes: DailyMix[]): Promise<void> {
+  await writeJSON(KEYS.dailyMixes, { date: new Date().toDateString(), mixes });
+}
+
+// ── Settings ───────────────────────────────────────────────────────────
+
+export async function getAutoplay(): Promise<boolean> {
+  const v = await readJSON<boolean | null>(KEYS.autoplay, null);
+  return v !== false; // default ON — endless radio like Spotify
+}
+
+export async function setAutoplay(on: boolean): Promise<void> {
+  await writeJSON(KEYS.autoplay, on);
+}
+
+export async function getSmartShuffleSetting(): Promise<boolean> {
+  return readJSON<boolean>(KEYS.smartShuffle, false);
+}
+
+export async function setSmartShuffleSetting(on: boolean): Promise<void> {
+  await writeJSON(KEYS.smartShuffle, on);
 }

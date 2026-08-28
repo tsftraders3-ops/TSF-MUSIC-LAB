@@ -1,76 +1,168 @@
-import React from 'react';
+/**
+ * TrackRow v2 — the workhorse row, tuned to Spotify specs:
+ * 52px rounded art, 16/500 title, 13/400 dim subtitle, explicit "E" box,
+ * animated equalizer on the active track, sparkle badge for Smart Shuffle
+ * picks, heart toggle, optional index / custom right slot / long-press.
+ */
+
+import React, { useEffect, useRef } from 'react';
 import {
+  Animated,
   Pressable,
   StyleSheet,
   Text,
   View,
-  ActivityIndicator,
+  type StyleProp,
   type ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { Track } from '../types';
-import { colors, spacing, type as typo } from '../theme';
+import { colors, fonts, spacing } from '../theme';
 import { Artwork } from './Artwork';
 import { usePlayer } from '../player/PlayerProvider';
+import { isDownloaded } from '../storage/downloads';
+
+/** Three looping bars — the "this is playing" heartbeat. */
+export function EqualizerBars({ playing, size = 14 }: { playing: boolean; size?: number }) {
+  const bars = useRef([new Animated.Value(0.3), new Animated.Value(0.65), new Animated.Value(0.45)]).current;
+
+  useEffect(() => {
+    if (!playing) {
+      bars.forEach((b) => b.stopAnimation());
+      return;
+    }
+    const loops = bars.map((b, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(b, { toValue: 1, duration: 320 + i * 110, useNativeDriver: true }),
+          Animated.timing(b, { toValue: 0.25, duration: 290 + i * 90, useNativeDriver: true }),
+        ]),
+      ),
+    );
+    loops.forEach((l) => l.start());
+    return () => loops.forEach((l) => l.stop());
+  }, [playing, bars]);
+
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: size, gap: 2 }}>
+      {bars.map((b, i) => (
+        <Animated.View
+          key={i}
+          style={{
+            width: Math.max(2, size / 5),
+            height: '100%',
+            borderRadius: 1,
+            backgroundColor: colors.accentBright,
+            transform: [{ scaleY: b }],
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+function ExplicitBadge() {
+  return (
+    <View style={styles.badge}>
+      <Text style={styles.badgeText}>E</Text>
+    </View>
+  );
+}
 
 export function TrackRow({
   track,
   index,
   onPress,
+  onLongPress,
   style,
+  showArtwork = true,
+  showHeart = true,
+  right,
+  subtitle,
 }: {
   track: Track;
   index?: number;
   onPress?: () => void;
-  style?: ViewStyle;
+  onLongPress?: () => void;
+  style?: StyleProp<ViewStyle>;
+  showArtwork?: boolean;
+  showHeart?: boolean;
+  right?: React.ReactNode;
+  subtitle?: string;
 }) {
-  const { active, isPlaying, loading, favorites, toggleLike } = usePlayer();
+  const { active, isPlaying, favorites, toggleLike } = usePlayer();
+  const [downloaded, setDownloaded] = React.useState(!!track.localUri);
   const isActive = active?.id === track.id;
   const isFav = favorites.has(track.id);
+
+  useEffect(() => {
+    let cancelled = false;
+    isDownloaded(track.id).then((ok) => {
+      if (!cancelled) setDownloaded(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [track.id]);
+
+  const sub =
+    subtitle ??
+    [track.artist, track.album].filter(Boolean).join(' • ');
 
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={280}
       android_ripple={{ color: colors.elevated }}
-      style={({ pressed }) => [styles.row, style, pressed && styles.pressed]}
+      style={({ pressed }) => [styles.row, style, pressed && { opacity: 0.75 }]}
     >
-      {index != null && !track.artwork ? (
-        <Text style={[styles.index, isActive && { color: colors.accent }]}>{index + 1}</Text>
-      ) : (
-        <Artwork uri={track.artwork} seed={track.id} size={52} />
-      )}
+      {index != null && !showArtwork ? (
+        <Text style={[styles.index, isActive && { color: colors.accentBright }]}>{index + 1}</Text>
+      ) : showArtwork ? (
+        <View>
+          <Artwork uri={track.artwork} seed={track.id} size={52} />
+          {isActive ? (
+            <View style={styles.eqOverlay}>
+              <EqualizerBars playing={isPlaying} size={16} />
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
       <View style={styles.meta}>
         <View style={styles.titleRow}>
-          {isActive && (
-            <View style={styles.eq}>
-              {loading ? (
-                <ActivityIndicator size="small" color={colors.accent} />
-              ) : (
-                <Ionicons name="bar-chart" size={13} color={colors.accent} style={{ transform: [{ rotate: '90deg' }] }} />
-              )}
-            </View>
-          )}
-          <Text style={[styles.title, isActive && { color: colors.accent }]} numberOfLines={1}>
+          {track.explicit ? <ExplicitBadge /> : null}
+          {track.isRecommended ? (
+            <Ionicons name="sparkles" size={13} color={colors.aiEnd} style={{ marginRight: 2 }} />
+          ) : null}
+          <Text style={[styles.title, isActive && { color: colors.accentBright }]} numberOfLines={1}>
             {track.title}
           </Text>
         </View>
-        <Text style={styles.subtitle} numberOfLines={1}>
-          {track.previewOnly ? 'PREVIEW · ' : ''}
-          {track.artist}
-          {track.album ? ` · ${track.album}` : ''}
-        </Text>
+        <View style={styles.subRow}>
+          {downloaded ? (
+            <Ionicons name="arrow-down-circle" size={13} color={colors.accentBright} style={{ marginRight: 3 }} />
+          ) : null}
+          {track.previewOnly ? (
+            <Text style={styles.previewTag}>PREVIEW</Text>
+          ) : null}
+          <Text style={styles.subtitle} numberOfLines={1}>
+            {sub}
+          </Text>
+        </View>
       </View>
-      <Pressable
-        hitSlop={12}
-        onPress={() => toggleLike(track)}
-        style={styles.likeBtn}
-      >
-        <Ionicons
-          name={isFav ? 'heart' : 'heart-outline'}
-          size={20}
-          color={isFav ? colors.accent : colors.textFaint}
-        />
-      </Pressable>
+
+      {right ??
+        (showHeart ? (
+          <Pressable hitSlop={12} onPress={() => toggleLike(track)} style={styles.likeBtn}>
+            <Ionicons
+              name={isFav ? 'heart' : 'heart-outline'}
+              size={21}
+              color={isFav ? colors.accentBright : colors.textFaint}
+            />
+          </Pressable>
+        ) : null)}
     </Pressable>
   );
 }
@@ -80,26 +172,61 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
-    paddingVertical: 8,
+    paddingVertical: 9,
     gap: spacing.md,
+    minHeight: 70,
   },
-  pressed: { opacity: 0.7 },
   index: {
-    width: 28,
-    color: colors.textFaint,
-    fontSize: typo.body,
+    width: 26,
+    color: colors.textDim,
+    fontSize: 16,
     textAlign: 'center',
-    fontFamily: 'System',
+    fontFamily: fonts.medium,
   },
-  meta: { flex: 1, gap: 2 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  eq: { width: 14, alignItems: 'center' },
+  meta: { flex: 1, gap: 3 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   title: {
     color: colors.text,
-    fontSize: typo.body,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '500',
+    fontFamily: fonts.medium,
     flexShrink: 1,
   },
-  subtitle: { color: colors.textDim, fontSize: typo.caption },
-  likeBtn: { padding: 6 },
+  subRow: { flexDirection: 'row', alignItems: 'center' },
+  subtitle: {
+    color: colors.textDim,
+    fontSize: 13,
+    fontFamily: fonts.regular,
+    flexShrink: 1,
+  },
+  previewTag: {
+    color: colors.textFaint,
+    fontSize: 9,
+    fontWeight: '700',
+    fontFamily: fonts.bold,
+    letterSpacing: 0.5,
+    marginRight: 5,
+  },
+  badge: {
+    width: 15,
+    height: 15,
+    borderRadius: 3,
+    backgroundColor: colors.textFaint,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: {
+    color: colors.bg,
+    fontSize: 10,
+    fontWeight: '700',
+    fontFamily: fonts.bold,
+  },
+  likeBtn: { padding: 8 },
+  eqOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+  },
 });

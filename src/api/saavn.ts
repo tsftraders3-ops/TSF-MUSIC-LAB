@@ -1,15 +1,15 @@
 /**
  * JioSaavn provider — runs 100% on-device. No server, no proxy.
  *
- * This is the same provider that previously lived in the Next.js API
- * routes, ported to pure client-side code. React Native has no CORS
- * restrictions, so the app talks to JioSaavn's public web API directly,
- * decrypts stream URLs locally (DES-ECB, pure-JS crypto-js) and hands
- * the resulting 320 kbps AAC CDN URL to the native player.
+ * React Native has no CORS restrictions, so the app talks to JioSaavn's
+ * public web API directly, decrypts stream URLs locally (DES-ECB, pure-JS
+ * crypto-js) and hands the resulting 320 kbps AAC CDN URL to the native
+ * player.
  */
 
 import CryptoJS from 'crypto-js';
 import type { Collection, Track } from '../types';
+import { filterClean, isClean } from '../safety';
 
 const API = 'https://www.jiosaavn.com/api.php';
 const DES_KEY = CryptoJS.enc.Utf8.parse('38346591');
@@ -98,10 +98,14 @@ function decodeEntities(s: string): string {
   return s
     .replace(/&quot;/g, '"')
     .replace(/&amp;/g, '&')
-    .replace(/&#039;/g, "'")
+    .replace(/&#0?39;/g, "'")
     .replace(/&apos;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>');
+}
+
+function truthyExplicit(v: unknown): boolean {
+  return v === '1' || v === 1 || v === true || v === 'true';
 }
 
 function mapSaavnSong(raw: any): Track | null {
@@ -109,8 +113,9 @@ function mapSaavnSong(raw: any): Track | null {
   const id = raw?.id ?? mi?.id;
   const enc = mi?.encrypted_media_url ?? raw?.encrypted_media_url;
   if (!id || !enc) return null;
+  const primaryArtist = mi?.artistMap?.primary_artists?.[0];
   const artist =
-    mi?.artistMap?.primary_artists?.[0]?.name ||
+    primaryArtist?.name ||
     mi?.primary_artists ||
     raw?.subtitle ||
     'Unknown artist';
@@ -119,6 +124,8 @@ function mapSaavnSong(raw: any): Track | null {
     title: decodeEntities(raw?.title ?? mi?.title ?? 'Unknown'),
     artist: decodeEntities(String(artist)),
     album: mi?.album ?? raw?.album ?? undefined,
+    albumId: String(mi?.album_id ?? raw?.album_id ?? '') || undefined,
+    artistId: primaryArtist?.id ? String(primaryArtist.id) : undefined,
     artwork: art500(mi?.image ?? raw?.image),
     duration: parseInt(mi?.duration ?? raw?.duration ?? '0', 10) || 0,
     source: 'saavn',
@@ -126,6 +133,7 @@ function mapSaavnSong(raw: any): Track | null {
     encryptedUrl: enc,
     previewOnly: false,
     has320: mi?.['320kbps'] === 'true' || raw?.['320kbps'] === 'true' || undefined,
+    explicit: truthyExplicit(mi?.explicit_content ?? raw?.explicit_content),
   };
 }
 
@@ -140,6 +148,17 @@ export async function searchSaavn(query: string, limit = 30): Promise<Track[]> {
   return results.map(mapSaavnSong).filter(Boolean) as Track[];
 }
 
+/** Search that keeps explicit items (user intent) — used by the Search tab. */
+export async function searchSaavnRaw(query: string, limit = 30): Promise<Track[]> {
+  return searchSaavn(query, limit);
+}
+
+/** Search with the safety filter applied — used by AI/algorithmic surfaces. */
+export async function searchSaavnClean(query: string, limit = 30): Promise<Track[]> {
+  const tracks = await searchSaavn(query, limit);
+  return filterClean(tracks);
+}
+
 export async function getCharts(): Promise<Collection[]> {
   const data = await saavnGet({ __call: 'content.getCharts' });
   if (!Array.isArray(data)) return [];
@@ -149,6 +168,7 @@ export async function getCharts(): Promise<Collection[]> {
     subtitle: c.more_info?.firstname ?? 'JioSaavn Chart',
     artwork: art500(c.image),
     trackCount: c.count ?? undefined,
+    kind: 'chart' as const,
   }));
 }
 
@@ -156,4 +176,54 @@ export async function getCollectionTracks(collectionId: string): Promise<Track[]
   const data = await saavnGet({ __call: 'playlist.getDetails', listid: collectionId });
   const list = Array.isArray(data?.list) ? data.list : [];
   return list.map(mapSaavnSong).filter(Boolean) as Track[];
+}
+
+/** Full album tracklist — powers "go to album" from the player. */
+export async function getAlbumTracks(albumId: string): Promise<Track[]> {
+  try {
+    const data = await saavnGet({ __call: 'content.getAlbumDetails', albumid: albumId });
+    const list = Array.isArray(data?.list)
+      ? data.list
+      : Array.isArray(data?.songs)
+        ? data.songs
+        : [];
+    return list.map(mapSaavnSong).filter(Boolean) as Track[];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Artist top-tracks — the backbone of song radio / "because you listened".
+ * Searches the artist name and keeps results whose artist matches.
+ */
+export async function getArtistTracks(artistName: string, limit = 14): Promise<Track[]> {
+  const tracks = await searchSaavn(artistName, Math.max(20, limit * 2));
+  const needle = artistName.toLowerCase().trim();
+  const matched = tracks.filter((t) => {
+    const a = t.artist.toLowerCase();
+    return a.includes(needle) || needle.includes(a.split(' feat')[0]);
+  });
+  const pool = matched.length >= 3 ? matched : tracks;
+  return pool.slice(0, limit);
+}
+
+/** Trending songs for home — always safety-filtered. */
+export async function getTrending(limit = 14): Promise<Track[]> {
+  const charts = await getCharts();
+  for (const chart of charts) {
+    try {
+      const tracks = await getCollectionTracks(chart.id);
+      const clean = filterClean(tracks);
+      if (clean.length >= 5) return clean.slice(0, limit);
+    } catch {
+      /* try next chart */
+    }
+  }
+  return [];
+}
+
+/** Clean-collection check for chart shelves on home. */
+export function collectionIsClean(c: Collection): boolean {
+  return isClean({ title: c.title, artist: c.subtitle });
 }

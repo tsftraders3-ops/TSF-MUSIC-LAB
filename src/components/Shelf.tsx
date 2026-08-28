@@ -1,7 +1,17 @@
+/**
+ * Shelf v2 — Spotify home shelf primitives:
+ *   • Shelf      — section with 22px bold header + horizontal rail
+ *   • ShelfCard  — full-radius cover card with title/subtitle
+ *   • ShelfCardWide — rectangle (playlist-ish) card variant
+ */
+
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { colors, spacing, radius, type as typo } from '../theme';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { colors, fonts, radius, spacing } from '../theme';
 import { Artwork } from './Artwork';
+import { PressableScale } from './PressableScale';
 
 export function ShelfCard({
   title,
@@ -10,6 +20,8 @@ export function ShelfCard({
   seed,
   onPress,
   size = 140,
+  round = true,
+  badge,
 }: {
   title: string;
   subtitle?: string;
@@ -17,21 +29,26 @@ export function ShelfCard({
   seed: string;
   onPress: () => void;
   size?: number;
+  round?: boolean;
+  badge?: React.ReactNode;
 }) {
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.card, { width: size }, pressed && { opacity: 0.8 }]}>
-      <Artwork uri={artwork} seed={seed} size={size} style={styles.art} />
+    <PressableScale onPress={onPress} style={{ width: size, gap: 10 }} haptic>
+      <View>
+        <Artwork uri={artwork} seed={seed} size={size} variant={round ? 'card' : 'rounded'} />
+        {badge}
+      </View>
       <View style={styles.textWrap}>
-        <Text style={styles.title} numberOfLines={2}>
+        <Text style={styles.cardTitle} numberOfLines={1}>
           {title}
         </Text>
         {subtitle ? (
-          <Text style={styles.subtitle} numberOfLines={1}>
+          <Text style={styles.cardSubtitle} numberOfLines={2}>
             {subtitle}
           </Text>
         ) : null}
       </View>
-    </Pressable>
+    </PressableScale>
   );
 }
 
@@ -60,6 +77,7 @@ export function Shelf({
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.scroller}
+        overScrollMode="always"
       >
         {children}
       </ScrollView>
@@ -67,8 +85,46 @@ export function Shelf({
   );
 }
 
+/** Home shortcut tile — Spotify's compact art+label chip grid. */
+export function QuickTile({
+  title,
+  artwork,
+  seed,
+  onPress,
+  width,
+  icon,
+}: {
+  title: string;
+  artwork?: string;
+  seed: string;
+  onPress: () => void;
+  width: number;
+  /** When set, renders a gradient + icon tile (e.g. Liked Songs). */
+  icon?: keyof typeof Ionicons.glyphMap;
+}) {
+  return (
+    <PressableScale onPress={onPress} haptic style={[styles.quickTile, { width }]}>
+      {icon && !artwork ? (
+        <LinearGradient
+          colors={['#4D2B8F', '#7C4DFF']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.quickIconWrap}
+        >
+          <Ionicons name={icon} size={22} color="#fff" />
+        </LinearGradient>
+      ) : (
+        <Artwork uri={artwork} seed={seed} size={56} variant="rounded" style={styles.quickArt} />
+      )}
+      <Text style={styles.quickTitle} numberOfLines={2}>
+        {title}
+      </Text>
+    </PressableScale>
+  );
+}
+
 const styles = StyleSheet.create({
-  shelf: { gap: spacing.md, marginBottom: spacing.lg },
+  shelf: { gap: 6, marginBottom: spacing.lg + 6 },
   header: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -77,14 +133,56 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: colors.text,
-    fontSize: typo.headline,
+    fontSize: 21,
     fontWeight: '800',
+    fontFamily: fonts.extrabold,
+    letterSpacing: -0.3,
   },
-  headerAction: { color: colors.textFaint, fontSize: typo.caption, fontWeight: '600' },
-  scroller: { paddingHorizontal: spacing.lg, gap: spacing.md },
-  card: { gap: spacing.sm },
-  art: { borderRadius: radius.md },
-  textWrap: { gap: 2, paddingRight: spacing.xs },
-  title: { color: colors.text, fontSize: typo.caption, fontWeight: '600' },
-  subtitle: { color: colors.textDim, fontSize: typo.micro },
+  headerAction: {
+    color: colors.textFaint,
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: fonts.semibold,
+  },
+  scroller: { paddingHorizontal: spacing.lg, gap: spacing.md + 2 },
+  cardTitle: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: fonts.semibold,
+  },
+  cardSubtitle: {
+    color: colors.textDim,
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    marginTop: 2,
+    lineHeight: 15,
+  },
+  textWrap: { gap: 1, paddingRight: 2 },
+  quickTile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderRadius: 5,
+    overflow: 'hidden',
+    height: 62,
+  },
+  quickArt: { borderRadius: 0, marginLeft: 6 },
+  quickIconWrap: {
+    width: 56,
+    height: '100%',
+    marginLeft: 6,
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickTitle: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: fonts.bold,
+    paddingHorizontal: 10,
+    lineHeight: 16,
+  },
 });

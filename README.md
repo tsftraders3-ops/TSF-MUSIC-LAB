@@ -1,50 +1,70 @@
-# TSF Music — Native
+# TSF Music v2.1 — Spotify-grade AI music app
 
-A **completely standalone** cross-platform music streaming app, rebuilt in
-React Native (Expo). No server, no URLs to configure, no setup — install the
-APK and it works.
+**A completely standalone, cross-platform (Android + iOS) music app.**
+No server. No setup. No account. Install and it works.
 
-## What changed from v1
+Music streams at 320 kbps straight from the device via direct JioSaavn
+API calls (DES-decrypted on-device) with an iTunes preview fallback —
+React Native talks to the APIs directly, so there are no CORS proxies,
+no backends, nothing to host.
 
-v1 wrapped the web app in a Capacitor WebView that pointed at a hosted
-Next.js server — away from that server it could only show a blank screen.
-v2 is a **real native app**: the music stack runs entirely on the device.
+## What's in v2.1 — the Spotify experience
 
-- **JioSaavn catalog, on-device**: search, trending charts and 320 kbps AAC
-  stream URLs (DES-ECB decrypted locally with pure-JS crypto) fetched
-  directly by the app — React Native has no CORS restrictions.
-- **iTunes fallback**: international gaps are topped up with 30-second
-  previews, clearly badged.
-- **Native audio engine** (react-native-track-player): background playback,
-  notification + lock-screen controls, headphone handling, automatic
-  recovery when a stream URL goes stale.
-- **Offline downloads**: save any song to the app's private storage from
-  the player screen; the queue automatically prefers the local file.
-- **Your library, on device**: favorites, play history and recent searches
-  in AsyncStorage — private, no account.
+### UI/UX (rebuilt to match Spotify's design language)
+- Spotify palette, type scale and layout system; Figtree typography
+- Home: greeting, quick-shortcut grid, horizontal shelves (Made for
+  You / Jump back in / Trending now / Because you listened / Charts)
+- Search: colorful genre "Browse all" grid, recent searches
+- Library: playlists, Liked, Downloads, Recent + Your Sound stats
+- Player: blurred artwork backdrop, scaled cover art, scrub slider,
+  control deck, queue sheet (Now playing / Next up), share
+- Press-scale micro-interactions with haptics everywhere
+- Toast pill notifications for every action
+- Animated equalizer bars on the active row, shimmer skeletons
 
-## Stack
+### TSF AI — 100% on-device intelligence
+- **AI Playlist Generator**: type a vibe ("Punjabi gym bangers",
+  "90s heartbreak Bollywood") → intent engine extracts artists, moods,
+  genres and eras → parallel catalog searches → scored, diversified,
+  safety-filtered 25-track playlist with staged "thinking" animation
+- **Smart Shuffle**: AI recommendations interleaved into the upcoming
+  queue, badged with sparkles (like Spotify's smart shuffle)
+- **Daily Mixes**: per-artist clusters of your heaviest rotations,
+  refreshed daily and cached
+- **Autoplay Radio**: when the queue ends, a song radio builds from
+  the last played artist and keeps playing — even if the UI is dead
+  (runs in the background playback service)
+- **Because you listened to …**: artist radios for your top artists
+- **Your Sound stats**: minutes, plays, top artists, top songs
+- The AI learns from your listening graph (recents, likes, play
+  counts) — stored only on your device
 
-Expo SDK 52 · React Native 0.76 · react-native-track-player ·
-react-navigation v7 · AsyncStorage · crypto-js · expo-file-system
+### Content safety
+Explicit/abusive content never appears on Home or any algorithmic
+surface: provider explicit flags + a word-boundary profanity blocklist
+(EN + Hindi/Punjabi). Search results (user intent) show an "E" badge
+instead.
+
+### Player
+320 kbps playback, background audio with notification/lock-screen
+controls, stale-URL auto-recovery, play next / add to queue / remove
+from queue, play counts, downloads for offline.
 
 ## Build
 
-GitHub Actions builds a signed release APK on every push to `main`
-(`.github/workflows/native-android.yml`). The signing keystore lives in
-GitHub Secrets — same identity as v1, so v2 upgrades in place. Tag `v*`
-to publish a GitHub Release.
-
-Local dev:
+GitHub Actions (`.github/workflows/native-android.yml`) stamps the
+version, prebuilds the native project and produces a signed release
+APK on every push to `main`; tags (`v*`) publish a GitHub Release.
 
 ```bash
 bun install
-bunx expo start          # Metro
-bunx expo run:android    # build & run on device/emulator
+bun run typecheck
+bunx expo start        # dev
+bunx expo run:android  # native build
 ```
 
-iOS: the codebase is cross-platform (`expo run:ios`); an Apple Developer
-account + build cloud (or Mac) is required to produce an IPA.
+## Stack
 
-The legacy web/WebView implementation is preserved on the `legacy-web`
-branch.
+React Native 0.76 · Expo SDK 52 (prebuild, bare workflow) ·
+react-native-track-player · expo-blur / haptics / linear-gradient /
+font · crypto-js (DES stream decryption) · TypeScript strict.

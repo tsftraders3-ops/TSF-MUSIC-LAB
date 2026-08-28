@@ -1,16 +1,23 @@
+/**
+ * Search v2 — Spotify's search: persistent rounded field up top,
+ * recent-search chips, and the iconic colorful "Browse all" genre grid.
+ * Each tile opens a search-backed collection. An AI banner card sits at
+ * the top of browse for one-tap playlist generation.
+ */
+
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Keyboard,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
   View,
-  Pressable,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import type { Track } from '../types';
@@ -22,18 +29,23 @@ import {
   pushRecentSearch,
 } from '../storage/store';
 import { TrackRow } from '../components/TrackRow';
-import { colors, spacing, radius, type as typo } from '../theme';
+import { PressableScale } from '../components/PressableScale';
+import { colors, fonts, radius, spacing, genreGradient } from '../theme';
 import type { RootStackParamList } from './navigation';
 
-const SUGGESTIONS = [
-  'Arijit Singh',
-  'Weeknd',
-  'Punjabi Top Hits',
-  'Lo-fi Beats',
-  'Eminem',
-  'Taylor Swift',
-  'AR Rahman',
-  'Travis Scott',
+const GENRES: Array<{ label: string; query: string; icon: string }> = [
+  { label: 'Pop', query: 'pop hits', icon: 'musical-notes' },
+  { label: 'Bollywood', query: 'bollywood hits', icon: 'film-outline' },
+  { label: 'Punjabi', query: 'punjabi hits', icon: 'flame' },
+  { label: 'Hip-Hop', query: 'rap hip hop', icon: 'mic-outline' },
+  { label: 'Rock', query: 'rock hits', icon: 'flash' },
+  { label: 'Lo-Fi', query: 'lofi songs', icon: 'moon-outline' },
+  { label: 'Party', query: 'party dance hits', icon: 'wine' },
+  { label: 'Romance', query: 'romantic love songs', icon: 'heart' },
+  { label: 'Workout', query: 'workout gym', icon: 'barbell' },
+  { label: 'Devotional', query: 'devotional bhajan', icon: 'flower-outline' },
+  { label: 'Sufi', query: 'sufi songs', icon: 'sparkles-outline' },
+  { label: '90s Bollywood', query: '90s hindi songs', icon: 'time-outline' },
 ];
 
 export function SearchScreen() {
@@ -46,7 +58,6 @@ export function SearchScreen() {
   const [loading, setLoading] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [searched, setSearched] = useState(false);
-  const inputRef = useRef<TextInput>(null);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchGen = useRef(0);
 
@@ -96,7 +107,20 @@ export function SearchScreen() {
     nav.navigate('Player');
   };
 
-  const showEmptyState = !query && !searched;
+  const openGenre = (label: string, q: string) => {
+    nav.navigate('Collection', {
+      collection: {
+        id: `genre-${label}`,
+        title: label,
+        subtitle: 'Browse',
+        artwork: '',
+        kind: 'search',
+        query: q,
+      },
+    });
+  };
+
+  const showBrowse = !query && !searched;
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -104,9 +128,8 @@ export function SearchScreen() {
         <View style={styles.inputRow}>
           <Ionicons name="search" size={20} color={colors.textFaint} />
           <TextInput
-            ref={inputRef}
             style={styles.input}
-            placeholder="Songs, artists, albums…"
+            placeholder="What do you want to listen to?"
             placeholderTextColor={colors.textFaint}
             value={query}
             onChangeText={setQuery}
@@ -114,56 +137,92 @@ export function SearchScreen() {
             onSubmitEditing={() => runSearch(query)}
             autoCorrect={false}
           />
-          {query.length > 0 && (
+          {query.length > 0 ? (
             <Pressable hitSlop={8} onPress={() => setQuery('')}>
-              <Ionicons name="close-circle" size={20} color={colors.textFaint} />
+              <Ionicons name="close" size={20} color={colors.textFaint} />
             </Pressable>
-          )}
+          ) : null}
         </View>
       </View>
 
-      {showEmptyState ? (
-        <View style={styles.emptyWrap}>
-          {recentSearches.length > 0 && (
-            <View style={styles.chipSection}>
-              <View style={styles.chipHeader}>
-                <Text style={styles.chipTitle}>Recent searches</Text>
-                <Pressable hitSlop={8} onPress={async () => {
-                  await clearRecentSearches();
-                  setRecentSearches([]);
-                }}>
-                  <Text style={styles.chipClear}>Clear</Text>
-                </Pressable>
-              </View>
-              <View style={styles.chipRow}>
-                {recentSearches.map((s) => (
-                  <Pressable key={s} style={styles.chip} onPress={() => setQuery(s)}>
-                    <Ionicons name="time-outline" size={14} color={colors.textFaint} />
-                    <Text style={styles.chipText}>{s}</Text>
-                  </Pressable>
-                ))}
-              </View>
+      {showBrowse ? (
+        <FlatList
+          data={GENRES}
+          keyExtractor={(g) => g.label}
+          numColumns={2}
+          columnWrapperStyle={styles.genreRow}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          contentContainerStyle={{ paddingBottom: 170 }}
+          ListHeaderComponent={
+            <View>
+              {recentSearches.length > 0 ? (
+                <View style={styles.chipSection}>
+                  <View style={styles.chipHeader}>
+                    <Text style={styles.chipTitle}>Recent searches</Text>
+                    <Pressable
+                      hitSlop={8}
+                      onPress={async () => {
+                        await clearRecentSearches();
+                        setRecentSearches([]);
+                      }}
+                    >
+                      <Text style={styles.chipClear}>Clear</Text>
+                    </Pressable>
+                  </View>
+                  <View style={styles.chipRow}>
+                    {recentSearches.map((s) => (
+                      <Pressable key={s} style={styles.chip} onPress={() => setQuery(s)}>
+                        <Ionicons name="time-outline" size={14} color={colors.textFaint} />
+                        <Text style={styles.chipText}>{s}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              ) : null}
+
+              <PressableScale
+                onPress={() => nav.navigate('Tabs', { screen: 'AI' })}
+                haptic
+                style={styles.aiBanner}
+              >
+                <Ionicons name="sparkles" size={26} color="#fff" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.aiBannerTitle}>Create a playlist with TSF AI</Text>
+                  <Text style={styles.aiBannerSub}>
+                    “Punjabi gym bangers”, “90s heartbreak Bollywood” — just describe it
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.8)" />
+              </PressableScale>
+
+              <Text style={styles.browseTitle}>Browse all</Text>
             </View>
-          )}
-          <View style={styles.chipSection}>
-            <Text style={styles.chipTitle}>Try something new</Text>
-            <View style={styles.chipRow}>
-              {SUGGESTIONS.map((s) => (
-                <Pressable key={s} style={styles.chip} onPress={() => setQuery(s)}>
-                  <Ionicons name="trending-up" size={14} color={colors.accent} />
-                  <Text style={styles.chipText}>{s}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        </View>
+          }
+          renderItem={({ item, index }) => {
+            const [c1, c2] = genreGradient(index);
+            return (
+              <PressableScale
+                onPress={() => openGenre(item.label, item.query)}
+                haptic
+                style={[styles.genreTile, { backgroundColor: c1 }]}
+              >
+                <View style={[styles.tileGradient, { backgroundColor: c2 }]} />
+                <Text style={styles.genreLabel}>{item.label}</Text>
+                <View style={styles.genreIconWrap}>
+                  <Ionicons name={item.icon as keyof typeof Ionicons.glyphMap} size={26} color="rgba(0,0,0,0.35)" />
+                </View>
+              </PressableScale>
+            );
+          }}
+        />
       ) : loading ? (
         <View style={styles.centerWrap}>
-          <ActivityIndicator size="large" color={colors.accent} />
+          <ActivityIndicator size="large" color={colors.accentBright} />
         </View>
       ) : results.length === 0 ? (
         <View style={styles.centerWrap}>
-          <Ionicons name="musical-notes-outline" size={44} color={colors.textFaint} />
+          <Ionicons name="musical-notes-outline" size={48} color={colors.textFaint} />
           <Text style={styles.noResults}>No results for “{query}”</Text>
           <Text style={styles.noResultsSub}>Check the spelling or try something else</Text>
         </View>
@@ -174,14 +233,13 @@ export function SearchScreen() {
           renderItem={({ item, index }) => (
             <TrackRow track={item} onPress={() => play(index)} />
           )}
-          ItemSeparatorComponent={() => <View style={{ height: 2 }} />}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
-          contentContainerStyle={{ paddingBottom: 120 }}
+          contentContainerStyle={{ paddingBottom: 170 }}
           ListHeaderComponent={
             degraded ? (
               <Text style={styles.degradedNote}>
-                Full-length streams unavailable for this search — showing 30s previews
+                Full-length streams unavailable — some results are 30s previews
               </Text>
             ) : null
           }
@@ -201,14 +259,18 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: radius.full,
     paddingHorizontal: spacing.lg,
-    height: 46,
+    height: 48,
   },
-  input: { flex: 1, color: colors.text, fontSize: typo.body, fontWeight: '500' },
-  emptyWrap: { paddingHorizontal: spacing.lg, paddingTop: spacing.xl, gap: spacing.xxl },
-  chipSection: { gap: spacing.md },
+  input: { flex: 1, color: colors.text, fontSize: 15, fontFamily: fonts.medium },
+  chipSection: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.md },
   chipHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  chipTitle: { color: colors.text, fontSize: typo.headline, fontWeight: '800' },
-  chipClear: { color: colors.textFaint, fontSize: typo.caption, fontWeight: '600' },
+  chipTitle: {
+    color: colors.text,
+    fontSize: 17,
+    fontWeight: '800',
+    fontFamily: fonts.extrabold,
+  },
+  chipClear: { color: colors.textDim, fontSize: 13, fontWeight: '600', fontFamily: fonts.semibold },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   chip: {
     flexDirection: 'row',
@@ -217,15 +279,80 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: radius.full,
     paddingHorizontal: spacing.lg,
-    paddingVertical: 8,
+    paddingVertical: 9,
   },
-  chipText: { color: colors.textDim, fontSize: typo.caption, fontWeight: '500' },
+  chipText: { color: colors.textDim, fontSize: 13, fontFamily: fonts.medium },
+  aiBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.lg,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.xl,
+    marginBottom: spacing.lg,
+    padding: spacing.lg + 2,
+    borderRadius: radius.xl,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: 'rgba(124,77,255,0.55)',
+  },
+  aiBannerTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+    fontFamily: fonts.bold,
+  },
+  aiBannerSub: {
+    color: colors.textDim,
+    fontSize: 12,
+    fontFamily: fonts.regular,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  browseTitle: {
+    color: colors.text,
+    fontSize: 21,
+    fontWeight: '800',
+    fontFamily: fonts.extrabold,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.md,
+  },
+  genreRow: { gap: 8, paddingHorizontal: spacing.lg, marginBottom: 8 },
+  genreTile: {
+    flex: 1,
+    height: 100,
+    borderRadius: radius.sm + 2,
+    padding: spacing.md - 2,
+    overflow: 'hidden',
+  },
+  tileGradient: {
+    position: 'absolute',
+    top: 0,
+    left: '50%',
+    right: 0,
+    bottom: 0,
+    opacity: 0.75,
+  },
+  genreLabel: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '800',
+    fontFamily: fonts.extrabold,
+    maxWidth: '75%',
+  },
+  genreIconWrap: {
+    position: 'absolute',
+    bottom: -8,
+    right: -4,
+    transform: [{ rotate: '15deg' }],
+  },
   centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, padding: spacing.xl },
-  noResults: { color: colors.text, fontSize: typo.headline, fontWeight: '700' },
-  noResultsSub: { color: colors.textDim, fontSize: typo.caption },
+  noResults: { color: colors.text, fontSize: 18, fontWeight: '700', fontFamily: fonts.bold },
+  noResultsSub: { color: colors.textDim, fontSize: 13, fontFamily: fonts.regular },
   degradedNote: {
     color: colors.textDim,
-    fontSize: typo.micro,
+    fontSize: 11,
+    fontFamily: fonts.medium,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,

@@ -1,0 +1,5 @@
+import { Ionicons } from '@expo/vector-icons';
+const glyphmap: Record<string, number> = Ionicons.glyphMap;
+const names = ['guitar','film-outline','flame','mic-outline','moon-outline','wine','heart','barbell','flower-outline','sparkles-outline','time-outline','musical-notes','sparkles','radio-outline','hourglass-outline','share-social-outline','trash-outline','checkmark-circle','alert-circle-outline','arrow-down-circle-outline','add-circle','add-circle-outline','add','add-outline','remove','remove-circle-outline','pencil','pencil-outline','close','chevron-forward','chevron-back','chevron-down','ellipsis-horizontal','stats-chart-outline','trophy','bulb-outline','play-forward-outline','musical-note','play','pause','play-skip-back','play-skip-forward','shuffle','repeat','repeat-1','heart-dislike-outline','heart-outline','list','home','home-outline','search','search-outline','library','library-outline','cloud-offline-outline','trending-up','time','refresh','arrow-forward','alert-outline'];
+const missing = names.filter(n => !(n in glyphmap));
+console.log(missing.length ? 'MISSING: ' + missing.join(', ') : 'ALL ICON NAMES VALID');

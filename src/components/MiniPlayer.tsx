@@ -1,25 +1,37 @@
+/**
+ * MiniPlayer v2 — Spotify's floating now-playing card: elevated dark
+ * pill above the tab bar, artwork + meta + heart + play/next, with a
+ * thin accent progress line running along its bottom edge.
+ */
+
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { colors, spacing, radius, type as typo } from '../theme';
-import { Artwork } from './Artwork';
-import { usePlayer } from '../player/PlayerProvider';
+import { useProgress } from 'react-native-track-player';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { colors, fonts, radius, spacing } from '../theme';
+import { Artwork } from './Artwork';
+import { usePlayer } from '../player/PlayerProvider';
+import { PressableScale } from './PressableScale';
 import type { RootStackParamList } from '../screens/navigation';
-import { useProgress } from 'react-native-track-player';
 
 export function MiniPlayer() {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const { active, isPlaying, togglePlay, next } = usePlayer();
-  const { position, duration } = useProgress(700);
+  const { active, isPlaying, loading, togglePlay, next, favorites, toggleLike } = usePlayer();
+  const { position, duration } = useProgress(500);
   if (!active) return null;
   const pct = duration > 0 ? Math.min(1, position / duration) : 0;
+  const isFav = favorites.has(active.id);
 
   return (
     <View style={styles.wrap}>
-      <Pressable style={styles.body} onPress={() => nav.navigate('Player')} android_ripple={{ color: colors.elevated }}>
-        <Artwork uri={active.artwork} seed={active.id} size={44} style={styles.art} />
+      <PressableScale
+        scaleTo={0.985}
+        onPress={() => nav.navigate('Player')}
+        style={styles.card}
+      >
+        <Artwork uri={active.artwork} seed={active.id} size={46} style={styles.art} />
         <View style={styles.meta}>
           <Text style={styles.title} numberOfLines={1}>
             {active.title}
@@ -28,17 +40,33 @@ export function MiniPlayer() {
             {active.artist}
           </Text>
         </View>
-        <Pressable hitSlop={10} onPress={togglePlay} style={styles.btn}>
+
+        <PressableScale hitSlop={10} onPress={() => toggleLike(active)} style={styles.btn}>
           <Ionicons
-            name={isPlaying ? 'pause' : 'play'}
-            size={26}
-            color={colors.text}
+            name={isFav ? 'heart' : 'heart-outline'}
+            size={22}
+            color={isFav ? colors.accentBright : colors.textDim}
           />
-        </Pressable>
-        <Pressable hitSlop={10} onPress={next} style={styles.btn}>
-          <Ionicons name="play-skip-forward" size={22} color={colors.text} />
-        </Pressable>
-      </Pressable>
+        </PressableScale>
+
+        <PressableScale hitSlop={10} onPress={togglePlay} style={styles.btn}>
+          {loading ? (
+            <View style={styles.spinnerWrap}>
+              <View style={styles.dot} />
+            </View>
+          ) : (
+            <Ionicons
+              name={isPlaying ? 'pause' : 'play'}
+              size={26}
+              color={colors.text}
+            />
+          )}
+        </PressableScale>
+
+        <PressableScale hitSlop={10} onPress={next} style={styles.btn}>
+          <Ionicons name="play-skip-forward" size={21} color={colors.text} />
+        </PressableScale>
+      </PressableScale>
       <View style={styles.progressTrack}>
         <View style={[styles.progressFill, { width: `${pct * 100}%` }]} />
       </View>
@@ -48,27 +76,49 @@ export function MiniPlayer() {
 
 const styles = StyleSheet.create({
   wrap: {
-    backgroundColor: '#18181D',
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
+    backgroundColor: '#2A2A2A',
+    borderRadius: radius.lg,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 14,
   },
-  body: {
+  card: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.sm + 2,
     paddingVertical: 8,
-    gap: spacing.md,
+    gap: 6,
   },
-  art: { borderRadius: radius.sm },
-  meta: { flex: 1, gap: 1 },
-  title: { color: colors.text, fontSize: typo.body, fontWeight: '600' },
-  artist: { color: colors.textDim, fontSize: typo.micro },
-  btn: { padding: 8 },
+  art: { borderRadius: 6 },
+  meta: { flex: 1, gap: 1, paddingHorizontal: 2 },
+  title: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: fonts.semibold,
+  },
+  artist: { color: colors.textDim, fontSize: 11, fontFamily: fonts.regular },
+  btn: { padding: 7 },
+  spinnerWrap: {
+    width: 26,
+    height: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.accentBright,
+    opacity: 0.9,
+  },
   progressTrack: {
     height: 2,
-    backgroundColor: colors.elevated,
+    backgroundColor: 'rgba(255,255,255,0.15)',
     width: '100%',
   },
-  progressFill: { height: 2, backgroundColor: colors.accent },
+  progressFill: { height: 2, backgroundColor: colors.text },
 });

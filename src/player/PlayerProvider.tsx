@@ -1,18 +1,23 @@
 /**
- * PlayerProvider — wraps react-native-track-player into a simple app-level
- * API: play a queue, shuffle, repeat, like, and downloads-aware playback.
+ * PlayerProvider v2 — wraps react-native-track-player into the app-level
+ * player API. Beyond v1 (queue, shuffle, repeat, likes), it adds:
  *
- * Design notes (gauntlet round 2):
+ *  • playNext / addToQueue / removeFromQueue  (real queue control)
+ *  • Smart Shuffle — injects AI recommendations between upcoming tracks
+ *  • Autoplay radio toggle (the endless extension itself runs in the
+ *    background service so it keeps working when the UI is killed)
+ *  • Play-count tracking that powers the AI listening graph
+ *  • Toast feedback for every queue mutation
+ *
+ * Design notes (gauntlet-inherited):
  *  - setup failures are never cached — next interaction retries cleanly
  *  - the RNTP queue is the single source of truth; React mirrors it
- *    (rehydrated on mount so app-kill-relaunch keeps shuffle/queue intact)
- *  - shuffle reorders only the *upcoming* tracks — never restarts the song
- *  - progress is NOT in this context (see useProgress in components) so
- *    playback doesn't re-render every row twice a second
+ *  - progress is NOT in this context so playback doesn't re-render rows
  */
 
 import React, {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -20,7 +25,7 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
-import { PermissionsAndroid, Platform } from 'react-native';
+import { AppState, PermissionsAndroid, Platform } from 'react-native';
 import TrackPlayer, {
   Capability,
   RepeatMode,
@@ -32,10 +37,17 @@ import TrackPlayer, {
 import type { Track } from '../types';
 import { resolveStreamUrl } from '../api/saavn';
 import { playbackService } from './service';
+import { getRecommendations } from '../ai/engine';
+import { useToast } from '../components/Toast';
 import {
+  getAutoplay,
   getDownloadIndex,
   getFavorites,
+  getSmartShuffleSetting,
+  incrementPlayCount,
   pushRecent,
+  setAutoplay as persistAutoplay,
+  setSmartShuffleSetting as persistSmartShuffle,
   toggleFavorite as storeToggleFavorite,
 } from '../storage/store';
 
@@ -47,9 +59,7 @@ async function askNotificationPermission(): Promise<void> {
   notifAsked = true;
   if (Platform.OS === 'android' && Platform.Version >= 33) {
     try {
-      await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
-      );
+      await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
     } catch {
       /* denied → playback still works, controls just won't show */
     }
@@ -89,7 +99,6 @@ async function ensureSetup(): Promise<void> {
       });
     })();
     setupPromise.catch(() => {
-      // Never cache a rejected setup — next tap retries from scratch.
       setupPromise = null;
     });
   }
@@ -111,6 +120,8 @@ interface PlayerState {
   loading: boolean;
   queue: Track[];
   shuffle: boolean;
+  smartShuffle: boolean;
+  autoplay: boolean;
   repeat: 'off' | 'queue' | 'track';
   favorites: Set<string>;
   playQueue: (tracks: Track[], startIndex?: number) => Promise<void>;
@@ -119,39 +130,65 @@ interface PlayerState {
   prev: () => Promise<void>;
   seek: (seconds: number) => Promise<void>;
   setShuffle: (on: boolean) => Promise<void>;
+  setSmartShuffle: (on: boolean) => Promise<void>;
+  setAutoplay: (on: boolean) => Promise<void>;
   cycleRepeat: () => Promise<void>;
   toggleLike: (track: Track) => Promise<void>;
+  playNext: (track: Track) => Promise<void>;
+  addToQueue: (track: Track) => Promise<void>;
+  removeFromQueue: (trackId: string) => Promise<void>;
+  refreshQueue: () => Promise<void>;
 }
 
 const PlayerContext = createContext<PlayerState | null>(null);
 
 export function PlayerProvider({ children }: { children: ReactNode }) {
+  const toast = useToast();
   const [queue, setQueue] = useState<Track[]>([]);
   const [shuffle, setShuffleState] = useState(false);
+  const [smartShuffle, setSmartShuffleState] = useState(false);
+  const [autoplay, setAutoplayState] = useState(true);
   const [repeat, setRepeat] = useState<'off' | 'queue' | 'track'>('off');
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const originalQueue = useRef<Track[]>([]);
   const recentPushed = useRef<string>('');
   const booted = useRef(false);
 
-  // Boot: rehydrate queue from RNTP (app-kill-relaunch continuity) + favorites.
+  const refreshQueue = useCallback(async () => {
+    try {
+      const rntpQueue = (await TrackPlayer.getQueue()) as unknown as Track[];
+      if (rntpQueue.length) setQueue(rntpQueue);
+      else setQueue([]);
+    } catch {
+      /* player not ready */
+    }
+  }, []);
+
+  // Boot: rehydrate queue from RNTP (app-kill-relaunch continuity) + settings.
   useEffect(() => {
     if (booted.current) return;
     booted.current = true;
     (async () => {
       try {
         await ensureSetup();
-        const rntpQueue = (await TrackPlayer.getQueue()) as unknown as Track[];
-        if (rntpQueue.length) {
-          setQueue(rntpQueue);
-          originalQueue.current = rntpQueue;
-        }
+        await refreshQueue();
       } catch {
         /* first cold start: empty queue */
       }
     })();
     getFavorites().then((list) => setFavorites(new Set(list.map((t) => t.id))));
-  }, []);
+    getSmartShuffleSetting().then(setSmartShuffleState);
+    getAutoplay().then(setAutoplayState);
+  }, [refreshQueue]);
+
+  // The background service may extend the queue with radio tracks while the
+  // UI is backgrounded — resync whenever the app comes back.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void refreshQueue();
+    });
+    return () => sub.remove();
+  }, [refreshQueue]);
 
   const playback = usePlaybackState();
   const activeRN = useActiveTrack();
@@ -161,13 +198,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return activeRN as unknown as Track;
   }, [activeRN]);
 
-  // Record play history (sanitized — no stream URLs in storage).
+  // Record play history + play counts (sanitized — no stream URLs in storage).
   useEffect(() => {
     if (active?.id && active.id !== recentPushed.current) {
       recentPushed.current = active.id;
       const { url, localUri, ...meta } = active as any;
       void localUri;
+      void url;
       pushRecent(meta as Track).catch(() => undefined);
+      incrementPlayCount(meta as Track).catch(() => undefined);
     }
   }, [active?.id]);
 
@@ -196,6 +235,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         previewUrl: t.previewUrl,
         previewOnly: t.previewOnly,
         has320: t.has320,
+        album: t.album,
+        albumId: t.albumId,
+        artistId: t.artistId,
+        explicit: t.explicit,
+        isRecommended: t.isRecommended,
         localUri: local?.localUri || t.localUri,
       } as unknown as RNTrack);
     }
@@ -209,10 +253,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const wantedId = tracks[startIndex]?.id;
       const playable = await buildPlayable(tracks);
       if (!playable.length || !wantedId) return;
-      const startAt = Math.max(
-        0,
-        playable.findIndex((t) => t.id === wantedId),
-      );
+      const startAt = Math.max(0, playable.findIndex((t) => t.id === wantedId));
       const mapped = playable as unknown as Track[];
       setQueue(mapped);
       originalQueue.current = tracks.filter((t) => mapped.some((m) => m.id === t.id));
@@ -220,8 +261,35 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       await TrackPlayer.add(playable);
       await TrackPlayer.skip(startAt);
       await TrackPlayer.play();
+      // Smart Shuffle persists across sessions — honor it on fresh queues.
+      if (smartShuffle) {
+        void injectRecommendations(startAt);
+      }
     } catch {
       /* transient setup/network failure — next tap retries */
+    }
+  }
+
+  /** Interleave AI recommendations into the upcoming queue. */
+  async function injectRecommendations(currentIdx: number): Promise<void> {
+    try {
+      await ensureSetup();
+      const rntpQueue = (await TrackPlayer.getQueue()) as unknown as Track[];
+      const base = rntpQueue.filter((t) => !t.isRecommended);
+      if (base.length < 2) return;
+      const recs = await getRecommendations(base.slice(currentIdx, currentIdx + 10), 6);
+      if (!recs.length) return;
+      let insertAt = currentIdx + 1;
+      for (const rec of recs.slice(0, 6)) {
+        const playable = await buildPlayable([{ ...rec, isRecommended: true }]);
+        if (playable.length) {
+          await TrackPlayer.add(playable, insertAt);
+          insertAt += 2;
+        }
+      }
+      await refreshQueue();
+    } catch {
+      /* recommendations are best-effort */
     }
   }
 
@@ -262,9 +330,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }
 
   /**
-   * Reorder only the UPCOMING tracks. The current song keeps playing
-   * untouched: we remove every other queue entry (descending so indices
-   * stay valid) and append the reordered remainder.
+   * Classic shuffle reorders only the UPCOMING tracks — never restarts
+   * the current song.
    */
   async function setShuffle(on: boolean): Promise<void> {
     setShuffleState(on);
@@ -276,9 +343,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
       const currentId = rntpQueue[currentIdx]?.id;
       const upcoming = rntpQueue.filter((_, i) => i !== currentIdx);
-      const reordered = on ? shuffleArray(upcoming) : originalQueue.current.filter((t) => t.id !== currentId);
+      const reordered = on
+        ? shuffleArray(upcoming)
+        : originalQueue.current.filter((t) => t.id !== currentId);
 
-      // Remove all other entries, back-to-front so indices stay valid.
       const removeIndices = rntpQueue
         .map((_, i) => i)
         .filter((i) => i !== currentIdx)
@@ -295,6 +363,45 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     } catch {
       /* keep UI state anyway */
     }
+  }
+
+  /**
+   * Smart Shuffle (Spotify-style): AI recommendations are interleaved
+   * between upcoming tracks, badged with a sparkle in the queue UI.
+   */
+  async function setSmartShuffle(on: boolean): Promise<void> {
+    setSmartShuffleState(on);
+    persistSmartShuffle(on).catch(() => undefined);
+    toast.show({
+      message: on ? 'Smart Shuffle on — TSF AI is mixing in picks' : 'Smart Shuffle off',
+      icon: 'sparkles',
+    });
+    try {
+      await ensureSetup();
+      if (!on) {
+        const rntpQueue = (await TrackPlayer.getQueue()) as unknown as Track[];
+        const removeIndices = rntpQueue
+          .map((t, i) => (t.isRecommended ? i : -1))
+          .filter((i) => i >= 0)
+          .sort((a, b) => b - a);
+        if (removeIndices.length) await TrackPlayer.remove(removeIndices);
+        await refreshQueue();
+        return;
+      }
+      const currentIdx = (await TrackPlayer.getActiveTrackIndex()) ?? 0;
+      await injectRecommendations(currentIdx);
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  async function toggleAutoplay(on: boolean): Promise<void> {
+    setAutoplayState(on);
+    persistAutoplay(on).catch(() => undefined);
+    toast.show({
+      message: on ? 'Autoplay on — radio keeps the music going' : 'Autoplay off',
+      icon: on ? 'radio-outline' : 'pause',
+    });
   }
 
   async function cycleRepeat(): Promise<void> {
@@ -317,6 +424,51 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       else nextSet.delete(track.id);
       return nextSet;
     });
+    toast.show({
+      message: nowFav ? 'Added to Liked Songs' : 'Removed from Liked Songs',
+      icon: nowFav ? 'heart' : 'heart-dislike-outline',
+    });
+  }
+
+  async function playNext(track: Track): Promise<void> {
+    try {
+      await ensureSetup();
+      const playable = await buildPlayable([track]);
+      if (!playable.length) return;
+      const currentIdx = await TrackPlayer.getActiveTrackIndex();
+      await TrackPlayer.add(playable, (currentIdx ?? -1) + 1);
+      await refreshQueue();
+      toast.show({ message: `Playing next: ${track.title}`, icon: 'play' });
+    } catch {
+      toast.show({ message: 'Could not queue that song', icon: 'alert-outline' });
+    }
+  }
+
+  async function addToQueue(track: Track): Promise<void> {
+    try {
+      await ensureSetup();
+      const playable = await buildPlayable([track]);
+      if (!playable.length) return;
+      await TrackPlayer.add(playable);
+      await refreshQueue();
+      toast.show({ message: `Added to queue: ${track.title}`, icon: 'add' });
+    } catch {
+      toast.show({ message: 'Could not queue that song', icon: 'alert-outline' });
+    }
+  }
+
+  async function removeFromQueue(trackId: string): Promise<void> {
+    try {
+      const rntpQueue = (await TrackPlayer.getQueue()) as unknown as Track[];
+      const idx = rntpQueue.findIndex((t) => t.id === trackId);
+      if (idx >= 0) {
+        await TrackPlayer.remove(idx);
+        await refreshQueue();
+        toast.show({ message: 'Removed from queue', icon: 'remove' });
+      }
+    } catch {
+      /* noop */
+    }
   }
 
   const value: PlayerState = useMemo(
@@ -326,6 +478,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       loading,
       queue,
       shuffle,
+      smartShuffle,
+      autoplay,
       repeat,
       favorites,
       playQueue,
@@ -334,11 +488,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       prev,
       seek,
       setShuffle,
+      setSmartShuffle,
+      setAutoplay: toggleAutoplay,
       cycleRepeat,
       toggleLike,
+      playNext,
+      addToQueue,
+      removeFromQueue,
+      refreshQueue,
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [active, isPlaying, loading, queue, shuffle, repeat, favorites],
+    [active, isPlaying, loading, queue, shuffle, smartShuffle, autoplay, repeat, favorites],
   );
 
   return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;

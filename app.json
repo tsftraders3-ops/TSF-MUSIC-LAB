@@ -2,7 +2,7 @@
   "expo": {
     "name": "TSF Music",
     "slug": "tsf-music",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -32,7 +32,9 @@
       "bundleIdentifier": "com.tsf.music",
       "supportsTablet": false,
       "infoPlist": {
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     }
   }

@@ -1,18 +1,65 @@
+/**
+ * TSF Music design system — Spotify-grade tokens.
+ * Palette mirrors Spotify's 2024 dark language; Figtree substitutes
+ * Circular. Every screen pulls colors/typography from here ONLY.
+ */
+
 export const colors = {
-  bg: '#0A0A0B',
-  surface: '#141417',
-  card: '#1A1A1F',
-  elevated: '#222228',
-  border: '#26262C',
+  // surfaces
+  bg: '#121212', // Spotify base canvas
+  bgDeep: '#0A0A0A', // behind modals / player backdrop
+  surface: '#181818',
+  card: '#242424', // elevated tile (Spotify "Connected" cards)
+  cardDim: '#1D1D1D',
+  elevated: '#2E2E2E',
+  border: '#2A2A2A',
+
+  // text
   text: '#FFFFFF',
-  textDim: '#A7ABB4',
-  textFaint: '#6A6E78',
-  accent: '#1DB954',
+  textDim: '#B3B3B3', // Spotify secondary
+  textFaint: '#737373',
+
+  // brand
+  accent: '#1DB954', // Spotify green
+  accentBright: '#1ED760', // CTA green (play buttons)
   accentDim: '#169C46',
-  gradientStart: '#7C4DFF',
-  gradientEnd: '#00E5FF',
-  danger: '#E5484D',
+  accentDeep: '#06130B', // text on green
+  danger: '#E91429',
+
+  // AI identity — signature violet→cyan
+  aiStart: '#7C4DFF',
+  aiMid: '#4D6BFF',
+  aiEnd: '#00E5FF',
+
+  // misc
+  white: '#FFFFFF',
+  black: '#000000',
+  overlay: 'rgba(0,0,0,0.55)',
 };
+
+/** Figtree weights loaded via expo-font in App.tsx. */
+export const fonts = {
+  regular: 'Figtree-400',
+  medium: 'Figtree-500',
+  semibold: 'Figtree-600',
+  bold: 'Figtree-700',
+  extrabold: 'Figtree-800',
+  black: 'Figtree-900',
+};
+
+const weightMap: Record<number, string> = {
+  400: fonts.regular,
+  500: fonts.medium,
+  600: fonts.semibold,
+  700: fonts.bold,
+  800: fonts.extrabold,
+  900: fonts.black,
+};
+
+/** Pick the loaded font family for a numeric weight. */
+export function font(weight: 400 | 500 | 600 | 700 | 800 | 900 = 500): string {
+  return weightMap[weight] ?? fonts.medium;
+}
 
 export const spacing = {
   xs: 4,
@@ -24,18 +71,41 @@ export const spacing = {
 };
 
 export const radius = {
-  sm: 6,
-  md: 10,
-  lg: 16,
-  xl: 24,
+  sm: 4,
+  md: 8,
+  lg: 12,
+  xl: 16,
+  xxl: 22,
   full: 999,
 };
 
+/** Spotify-ish type scale (px). */
 export const type = {
-  hero: 30,
+  hero: 26,
   title: 22,
-  headline: 17,
+  headline: 18,
+  subhead: 15,
   body: 15,
   caption: 13,
   micro: 11,
 };
+
+/** Genre tile palette for Search "Browse all" — Spotify's colorful grid. */
+export const genreColors: Array<[string, string]> = [
+  ['#E8115B', '#C4187C'], // pop
+  ['#8D67AB', '#5E4B8B'], // bollywood
+  ['#DC148C', '#9B1B7A'], // punjabi
+  ['#1E3264', '#132A4E'], // hip hop
+  ['#E13300', '#A82600'], // rock
+  ['#477D95', '#2E5468'], // chill
+  ['#BA5D07', '#8C4405'], // lo-fi
+  ['#503750', '#332233'], // devotional
+  ['#0D73EC', '#0A57B0'], // party
+  ['#537AA1', '#35516C'], // romance
+  ['#AF2896', '#7C1B6B'], // workout
+  ['#7D4B32', '#573322'], // acoustic
+];
+
+export function genreGradient(i: number): [string, string] {
+  return genreColors[i % genreColors.length];
+}
