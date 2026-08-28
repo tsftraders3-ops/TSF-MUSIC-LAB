@@ -145,3 +145,23 @@ Stage Summary:
 - CI: v2.4.0 tag run in progress at commit time (monitor to green)
 - All playback/AI/safety/download logic untouched — pure UI layer + contextId tracking
 - Reminder: user rotates GitHub token after session
+
+---
+Task ID: 6 (final)
+Agent: Super Z (main agent)
+Task: v2.4 ship verification
+
+Work Log:
+- CI: v2.4.0 tag run → SUCCESS; main run → SUCCESS (both green)
+- Release published: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v2.4.0 (app-release.apk, 65.7 MB)
+- APK deep-verified: manifest version 2.4.0; 4 dex files; 1.8 MB Hermes bundle containing
+  chipActiveBg / fabGreen / openQueue / contextId / Figtree-500 markers; webmocks NOT
+  leaked; app.config intact; same CI keystore as v2.0–v2.3 → in-place upgrade
+
+Stage Summary:
+- FINAL SHIP: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v2.4.0 (install this one)
+- v2.4 = the app now genuinely looks like Spotify: gradient washes from artwork,
+  white-active pills, translucent tiles, gradient mini player, plain-white play glyph,
+  Spotify meta formats — all faithful to the reference repo + pixel-measured geometry
+- All playback/AI/safety/download behavior untouched; zero native modules added
+- Reminder: user rotates GitHub token after session
