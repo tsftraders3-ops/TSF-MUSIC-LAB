@@ -182,3 +182,21 @@ Stage Summary:
 - v2.3.1 = the exact v2.3.0 UI the user preferred, shipped as an upgradable APK
 - v2.4-only markers (chipActiveBg white pills, gradient mini player wash, openQueue route param) are gone; all v2.3 UI back
 - Playback/AI/safety/downloads completely untouched (no code change beyond the UI revert)
+
+---
+Task ID: 7 (final)
+Agent: Super Z (main agent)
+Task: v2.3.1 ship verification
+
+Work Log:
+- CI: v2.3.1 tag run → SUCCESS; main run → SUCCESS (both green)
+- Release published: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v2.3.1 (app-release.apk, 65 MB)
+- APK deep-verified: 4 dex files; manifest versionName "2.3.1" (UTF-16 probe), "2.4.0" absent
+- versionCode 120 (run_number 20) > v2.4.0's 116 → in-place upgrade over v2.4.0; same CI keystore
+- Hermes bundle markers: v2.3 markers PRESENT (boostForPlayer, Now playing, Next up, Browse all, Lyrics);
+  v2.4 markers ABSENT (chipActiveBg, fabGreen, openQueue, contextId) → confirmed v2.3 UI restored in the binary
+
+Stage Summary:
+- FINAL SHIP: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v2.3.1 (install this one)
+- Rollback complete: app is byte-identical to the v2.3 UI the user preferred
+- Reminder: user rotates GitHub token after session
