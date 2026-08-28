@@ -522,11 +522,11 @@ const styles = StyleSheet.create({
     borderRadius: radius.full,
     paddingHorizontal: 13,
     paddingVertical: 7,
-    backgroundColor: colors.chipInactiveBg, // repo: 10% white
+    backgroundColor: colors.card, // Spotify chip gray
   },
-  chipActive: { backgroundColor: colors.chipActiveBg }, // repo: white pill
+  chipActive: { backgroundColor: colors.accentBright },
   chipText: { color: colors.text, fontSize: 13, fontWeight: '600', fontFamily: fonts.semibold },
-  chipTextActive: { color: colors.chipActiveText },
+  chipTextActive: { color: colors.accentDeep },
   sortRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',

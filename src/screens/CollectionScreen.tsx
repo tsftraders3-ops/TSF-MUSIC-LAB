@@ -26,14 +26,6 @@ import { colors, fonts, radius, spacing } from '../theme';
 import { useTrackPalette } from '../theme/DynamicThemeProvider';
 import type { RootStackParamList } from './navigation';
 
-/** "7 songs, 25 min" — Spotify playlist meta format (no bitrates). */
-function fmtTotal(seconds: number): string {
-  const m = Math.round(seconds / 60);
-  if (m < 60) return `${m} min`;
-  const h = Math.floor(m / 60);
-  return `${h} hr ${m % 60} min`;
-}
-
 export function CollectionScreen() {
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const route = useRoute<RouteProp<RootStackParamList, 'Collection'>>();
@@ -75,7 +67,7 @@ export function CollectionScreen() {
 
   const play = (index: number) => {
     if (tracks && tracks.length) {
-      playQueue(tracks, index, collection.id);
+      playQueue(tracks, index);
       nav.navigate('Player');
     }
   };
@@ -83,7 +75,7 @@ export function CollectionScreen() {
   const playShuffled = () => {
     if (!tracks?.length) return;
     const shuffled = [...tracks].sort(() => Math.random() - 0.5);
-    playQueue(shuffled, 0, collection.id);
+    playQueue(shuffled, 0);
     nav.navigate('Player');
   };
 
@@ -133,11 +125,7 @@ export function CollectionScreen() {
             </View>
             <Text style={styles.title}>{collection.title}</Text>
             <Text style={styles.sub}>
-              {tracks
-                ? `${tracks.length} ${tracks.length === 1 ? 'song' : 'songs'}, ${fmtTotal(
-                    tracks.reduce((acc, t) => acc + (t.duration || 0), 0),
-                  )}`
-                : 'Loading…'}
+              {tracks ? `${tracks.length} songs · 320 kbps` : 'Loading…'}
             </Text>
 
             {/* Spotify action row */}

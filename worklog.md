@@ -165,3 +165,20 @@ Stage Summary:
   Spotify meta formats — all faithful to the reference repo + pixel-measured geometry
 - All playback/AI/safety/download behavior untouched; zero native modules added
 - Reminder: user rotates GitHub token after session
+
+---
+Task ID: 7
+Agent: Super Z (main agent)
+Task: v2.3.1 — rollback to v2.3 UI (user: "The previous version was better. Switch back to previous version")
+
+Work Log:
+- User compared v2.4.0 (repo-faithful rebuild: gradient washes, white-active pills, gradient mini player) against v2.3.0 (A-to-Z Spotify Android UI) and preferred v2.3.0
+- Verified post-v2.3.0 history: exactly ONE code commit (cae2c41, 11 files) + 3 worklog-only commits → clean single-commit revert possible
+- git revert --no-commit cae2c41 → verified `git diff v2.3.0` (excl. worklog.md) is EMPTY = byte-exact v2.3.0 codebase restored
+- Gate: bunx tsc --noEmit CLEAN
+- Commit + push main + tag v2.3.1 (CI stamps versionCode = 100 + run_number → automatically higher than v2.4.0's → in-place upgrade over v2.4.0; versionName = 2.3.1 from tag)
+
+Stage Summary:
+- v2.3.1 = the exact v2.3.0 UI the user preferred, shipped as an upgradable APK
+- v2.4-only markers (chipActiveBg white pills, gradient mini player wash, openQueue route param) are gone; all v2.3 UI back
+- Playback/AI/safety/downloads completely untouched (no code change beyond the UI revert)
