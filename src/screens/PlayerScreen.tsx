@@ -12,6 +12,7 @@ import {
   Image,
   Modal,
   Pressable,
+  ScrollView,
   Share,
   StyleSheet,
   Text,
@@ -180,11 +181,13 @@ export function PlayerScreen() {
         />
       )}
 
-      <View
-        style={[
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[
           styles.scroll,
           { paddingTop: insets.top + spacing.lg, paddingBottom: insets.bottom + 20 },
         ]}
+        showsVerticalScrollIndicator={false}
       >
         <View style={styles.topRow}>
           <Pressable hitSlop={12} onPress={() => nav.goBack()}>
@@ -333,7 +336,7 @@ export function PlayerScreen() {
         {active?.previewOnly ? (
           <Text style={styles.previewNote}>30-second preview (full stream unavailable)</Text>
         ) : null}
-      </View>
+      </ScrollView>
 
       {/* Queue sheet */}
       <Modal visible={showQueue} animationType="slide" onRequestClose={() => setShowQueue(false)}>

@@ -81,7 +81,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {toast ? (
         <Animated.View
           pointerEvents="none"
-          style={[styles.wrap, { bottom: 108 + insets.bottom, opacity: anim, transform: [{ translateY }] }]}
+          style={[styles.wrap, { bottom: 148 + insets.bottom, opacity: anim, transform: [{ translateY }] }]}
         >
           <View style={styles.pill}>
             {toast.icon ? (
