@@ -232,3 +232,20 @@ Stage Summary:
 - v2.4.1 = the honest fix: real Spotify home is FLAT + white-active pills + art tiles; artwork washes live only on playlist/album/player; modern play glyph + white thumb
 - The "deeper issue" was misapplied design (muddy wash on home + fidelity stack), NOT the build pipeline (verified clean end-to-end)
 - All playback/AI/safety/download logic untouched — pure UI layer
+
+---
+Task ID: 8 (final)
+Agent: Super Z (main agent)
+Task: v2.4.1 ship verification
+
+Work Log:
+- CI: v2.4.1 tag run (run#23) → SUCCESS; main run (run#22) → SUCCESS
+- Release published: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v2.4.1 (65.7 MB APK)
+- APK deep-verified: manifest versionName "2.4.1" (UTF-16 probe); versionCode 123 (> v2.3.1's 120 → in-place upgrade); 4 dex; 26/26 TTFs valid magic bytes; all 6 Figtree weights embedded (size-matched)
+- Hermes bundle markers all present: chipActiveBg, chipActiveText, chipInactiveBg, wash; webmocks not leaked
+
+Stage Summary:
+- FINAL SHIP: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v2.4.1 (install this one)
+- v2.4.1 = flat #121212 home + white-active All/Music pills + art quick tiles + 8px radii + semibold card titles + plain white 62px play glyph + white progress thumb + vivid never-muddy wash on playlist/album/player only
+- Root cause of "never looks like Spotify": misapplied design (muddy wash over home + fidelity stack), NOT the build pipeline — pipeline audited clean end-to-end (fonts/extraction/bundle freshness all verified live)
+- Reminder: user rotates GitHub token after session
