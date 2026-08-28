@@ -150,7 +150,7 @@ function WaveformScrubber({
             height: Math.round(h * HEIGHT),
             borderRadius: 2,
             backgroundColor:
-              i < playedBars ? glow : i === playedBars ? withAlpha(glow, 0.55) : 'rgba(255,255,255,0.18)',
+              i < playedBars ? glow : i === playedBars ? withAlpha(glow, 0.55) : 'rgba(255,255,255,0.22)',
           }}
         />
       ))}

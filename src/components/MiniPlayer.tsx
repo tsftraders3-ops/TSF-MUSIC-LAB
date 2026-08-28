@@ -85,16 +85,16 @@ export function MiniPlayer() {
 
 const styles = StyleSheet.create({
   wrap: {
-    backgroundColor: 'rgba(16,17,21,0.88)',
+    backgroundColor: 'rgba(18,19,24,0.94)',
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glassBorder,
+    borderColor: colors.glassBorderStrong,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOpacity: 0.5,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 14,
+    shadowOpacity: 0.55,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 16,
   },
   card: {
     flexDirection: 'row',
