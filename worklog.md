@@ -66,3 +66,24 @@ Stage Summary:
 - v2.2.0 = the app now REPAINTS ITSELF with every song: ambient washes, player, mini player, chips, hero cards all wear the artwork's extracted colors
 - Zero native-module additions (jpeg-js is pure JS) → CI build risk unchanged vs v2.1
 - All playback/AI/safety/download logic untouched — pure UI-layer transformation
+
+---
+Task ID: 4 (final)
+Agent: Super Z (main agent)
+Task: v2.2 gauntlet completion — visual verification + releases + APK deep-verification
+
+Work Log:
+- Built pixel-faithful HTML mock of the new UI (scripts/mock/v22_preview.html — 3 phone frames: Home w/ red ambient, Player w/ red vinyl+waveform, Player w/ teal for a different song) using the same color tokens + waveform algorithm; screenshot via agent-browser; VLM design critique:
+  ✓ vinyl premium, ✓ waveform reads as progress, ✓ red↔teal per-song theming clearly demonstrated, ✓ glass layers balanced
+  → applied 2 critique fixes: waveform unplayed bars 0.18→0.22 contrast, mini player elevation (bg 0.94, stronger border/shadow)
+- Commit 123f4ec (v2.2.0) + polish commit e229c4f pushed to main
+- CI gauntlet: v2.2.0 tag run → SUCCESS, published https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v2.2.0 (65.7 MB APK)
+- Tagged v2.2.1 (includes polish) → CI run → SUCCESS → published https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v2.2.1
+- v2.2.1 APK deep-verified: version 2.2.1, versionCode 110 (monotonic in-place upgrade), 4 dex, 26 fonts, Hermes bundle contains jpeg/quantize/AmbientBackdrop/VinylDisc/WaveformScrubber/extractPalette/spindle + the 0.22 waveform polish string
+- Same keystore → installs as upgrade over v2.0.x/v2.1.x without uninstalling
+
+Stage Summary:
+- FINAL SHIP: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v2.2.1 (install this one)
+- v2.2 = the app repaints itself with every song: live artwork color extraction → ambient washes, vinyl player, waveform, glass capsules, tinted cards
+- Zero native modules added; all playback/AI/safety/download behavior untouched
+- Reminder: user rotates GitHub token after session
