@@ -657,3 +657,27 @@ Stage Summary:
   bundle verified clean
 - Release: commit + tag v3.3.0 pending → CI APK (reminder: user rotates
   GitHub token after session)
+
+---
+Task ID: 8 (final)
+Agent: Super Z (main agent)
+Task: v3.3.0 release verification
+
+Work Log:
+- Rebased over the duplicate docs commit on origin (identical trees;
+  --skip, no content change); gates re-verified post-rebase: tsc clean,
+  126/126
+- Pushed main + tag v3.3.0 → CI tag run #40 SUCCESS + main run #39 SUCCESS
+- APK deep-verified (scripts/verify_v33_apk.py): manifest versionName
+  3.3.0 (UTF-16 probe); 2.00 MB Hermes bundle with ALL 15 Search V2
+  markers (searchLexicon, getAutocomplete, autocomplete.get,
+  searchLyricByFragment, lrclib, lyricMatch, Best guess, LYRIC_MATCH,
+  YOUR_PAST_CLICK, planSearch, correctToken, clusterKey, Did you mean,
+  versionCount); webmocks NOT leaked; release page live (HTTP 200)
+
+Stage Summary:
+- FINAL SHIP: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v3.3.0
+  (install this one; same keystore → in-place upgrade over 3.2.0)
+- Upgraders see the 3.3.0 What's-new (Search V2 notes); fresh installs
+  get What's-new → onboarding → Search V2
+- Reminder: user rotates GitHub token after session
