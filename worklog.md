@@ -391,3 +391,46 @@ Stage Summary:
 - Deliverable: download/tsf-ui-screenshots/ (21 screens × 2 devices + side-by-side pairs + HTML gallery)
 - Lab improvement persisted: device profiles now match native full-screen rendering (applies to all future lab runs)
 - Awaiting user confirmation on the current UI before further iteration
+
+---
+Task ID: 5 (session 2026-08-29, part 4)
+Agent: Super Z (main agent)
+Task: Reintroduce the original 3-step first-run onboarding (user: "ask name → favorite artists → types of songs… run the gauntlet loop end to end… keep it more or less like Spotify… finishing touch")
+
+Work Log:
+- Engine wiring: BuildOptions.onboardingGenres + ONBOARDING.genreSeedWeight 2.2 → profile.genres affinity (matches GENRE_PRIORS keys exactly); setOnboardingSeeds(artists, genres); resetProfile clears both; 'userName' kv
+- NEW src/components/Onboarding.tsx (replaces OnboardingPick5, deleted): full-screen 3-step flow — (1) "What's your name?" white-circle logo + dark input w/ subtle white focus border (web default orange ring killed via outlineWidth:0), full-width green pill bottom CTA; (2) "Choose 3 or more artists you like." centered title, #282828 squircle search, 3-col CIRCULAR avatars, selection = white ring flush on edge + white badge w/ black check top-right, magenta "More Bollywood" grid-end tile (loads secondary query), 15-tile base pool so it lands on-screen; (3) "What kind of music do you like?" 12 gradient genre tiles + bottom-left contrast scrim (all ≥5.9:1), selected = white border + white check (icon stays); safe-area insets on all steps; muted-green #169C46 disabled CTA; comma-split artist names; skippable steps 2-3; gated on WhatsNew dismissal (fresh installs show both — modal stacking fix, poll tsf.whatsNewDismissed)
+- HomeScreen: "Made for {name}" shelf (desktop-Spotify behaviour) via kv read + mindbeat.onProfile subscription (fires exactly when onboarding seeds rebuild the profile)
+- Lab: full onboarding walkthrough (fill name "Rahul", pick 3 artists, 2 genres) + scrolled proof captures (03c More tile, 04c genre end) on both devices
+- GAUNTLET 4 rounds vs fetched GENUINE Spotify refs (image-search → VLM-verified real):
+  • R1 (2 fresh critics): FAIL — orange focus ring, square avatars (genuine = circles), green selection (genuine = white ring/white+black check), chip row not genuine, count FAB occluding grid, genre contrast 10/12 tiles <3:1, no iOS safe areas, title alignment
+  • R2 (2 fresh critics): near-win — contrast now 24/24 ≥5.9:1 PASS, selection treatment pixel-verified PASS; remaining: More tile below fold, genre last-row footer clearance, muddy disabled CTA
+  • R3 (verifier): both fixed + 2 new catches — name CTA only 16% width (PressableScale applies style to inner view; alignSelf never reaches the flex child) → moved to the shared bottom-footer pattern; 03b selection proof off-screen (lab scroll bug) → scroll-back-to-top before picking
+  • R4 (final gate): SHIP — full-width pill, 3 rings+badges in viewport on both devices, More tile grid-aligned, no new P0s
+- Finishing touches: lab playlist selector now matches "Made for {name}"; genre palette rotated for pairwise separability; gridPad 150dp; ctaDim style
+- Gates: tsc clean; bun test 74/74; lab 32/32 both devices 0 console errors; bundle 3.12MB hbc, all v3.1.0 markers (What's your name? / Choose 3 or more / best bollywood songs / onboardingGenres / Made for / Pick at least one), webmocks NOT leaked
+- Commit b6ff671 + tag v3.1.0 → pushed; CI tag run 33241833521 + main run 33241833514
+- User-facing package regenerated: download/tsf-ui-screenshots/ (27 states × 2 devices + side-by-side + UI-Gallery.html)
+
+Stage Summary:
+- v3.1.0 = the original first-run experience is back, Spotify-faithful and gauntlet-verified end to end: name → artists (circles, search, More Bollywood) → genres (12 tiles) → engine seeds → "Made for {name}" on Home
+- Onboarding gates behind the What's-new dialog (no stacking)
+- Release: pending CI green → https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v3.1.0
+- Reminder: user rotates GitHub token after session
+
+---
+Task ID: 5 (final)
+Agent: Super Z (main agent)
+Task: v3.1.0 release verification
+
+Work Log:
+- CI tag run 33241833521 SUCCESS + main run 33241833514 SUCCESS
+- Release live: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v3.1.0 (75 MB APK)
+- APK deep-verified (scripts/verify_v31_apk.py): manifest versionName "3.1.0" (UTF-16); assets/index.android.bundle contains ALL v3.1.0 markers (What's your name? / Choose 3 or more artists you like. / What kind of music do you like? / onboardingGenres / Made for / Pick at least one / MINDBEAT / best bollywood songs); webmocks NOT leaked
+- versionCode = 100 + run_number (CI mechanism, monotonic) → in-place upgrade over v3.0.0; same keystore
+
+Stage Summary:
+- FINAL SHIP: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v3.1.0 (install this one)
+- First launch on a FRESH INSTALL (or after clearing app data) now shows: What's-new → "What's your name?" → circular artist picker (search + More Bollywood) → genre tiles → Home with "Made for {name}"
+- Note: existing installs that already completed the old Pick-5 will NOT see onboarding again (onboardingDone persisted) — clear app data to re-experience
+- Reminder: user rotates GitHub token after session
