@@ -12,3 +12,7 @@ agent-ctx/
 scripts/
 docs/
 tool-results/
+
+# device lab artifacts (regenerate with: bash scripts/lab.sh)
+screenshots/
+.fixture-cache/
