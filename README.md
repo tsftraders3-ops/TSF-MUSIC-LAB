@@ -1,70 +1,189 @@
-# TSF Music v2.1 — Spotify-grade AI music app
+# TSF Music v3.2 — MINDBEAT
 
-**A completely standalone, cross-platform (Android + iOS) music app.**
-No server. No setup. No account. Install and it works.
+**A standalone, cross-platform (Android + iOS) music app with a Spotify-grade
+interface and a learning, on-device intelligence engine.**
+No server. No setup. No account. Install the APK and it works.
 
-Music streams at 320 kbps straight from the device via direct JioSaavn
+Music streams at **320 kbps** straight from the device via direct JioSaavn
 API calls (DES-decrypted on-device) with an iTunes preview fallback —
-React Native talks to the APIs directly, so there are no CORS proxies,
-no backends, nothing to host.
+React Native talks to the APIs directly, so there are no CORS proxies, no
+backends, nothing to host. Every AI feature runs **100% on the device**:
+no LLM APIs, no analytics, no telemetry — your listening history never
+leaves the phone.
 
-## What's in v2.1 — the Spotify experience
+> **Install**: grab `app-release.apk` from the latest release
+> (https://github.com/mua47105-hue/TSF-MUSIC/releases) and sideload it.
+> Builds are signed with the same keystore, so updates install in place.
 
-### UI/UX (rebuilt to match Spotify's design language)
-- Spotify palette, type scale and layout system; Figtree typography
-- Home: greeting, quick-shortcut grid, horizontal shelves (Made for
-  You / Jump back in / Trending now / Because you listened / Charts)
-- Search: colorful genre "Browse all" grid, recent searches
-- Library: playlists, Liked, Downloads, Recent + Your Sound stats
-- Player: blurred artwork backdrop, scaled cover art, scrub slider,
-  control deck, queue sheet (Now playing / Next up), share
-- Press-scale micro-interactions with haptics everywhere
-- Toast pill notifications for every action
-- Animated equalizer bars on the active row, shimmer skeletons
+---
 
-### TSF AI — 100% on-device intelligence
-- **AI Playlist Generator**: type a vibe ("Punjabi gym bangers",
-  "90s heartbreak Bollywood") → intent engine extracts artists, moods,
-  genres and eras → parallel catalog searches → scored, diversified,
-  safety-filtered 25-track playlist with staged "thinking" animation
-- **Smart Shuffle**: AI recommendations interleaved into the upcoming
-  queue, badged with sparkles (like Spotify's smart shuffle)
-- **Daily Mixes**: per-artist clusters of your heaviest rotations,
-  refreshed daily and cached
-- **Autoplay Radio**: when the queue ends, a song radio builds from
-  the last played artist and keeps playing — even if the UI is dead
-  (runs in the background playback service)
-- **Because you listened to …**: artist radios for your top artists
-- **Your Sound stats**: minutes, plays, top artists, top songs
-- The AI learns from your listening graph (recents, likes, play
-  counts) — stored only on your device
+## What's inside
+
+### The player
+- **320 kbps playback** with background audio, notification and lock-screen
+  controls (react-native-track-player)
+- **Stale-URL auto-recovery**: expired CDN links are silently refetched and
+  re-decrypted mid-session
+- Real queue control: play next, add to queue, remove from queue, shuffle,
+  repeat
+- **Downloads for offline** — resolved streams are saved into the app's
+  private document directory and play back forever
+- Share sheet, per-track long-press menu, toast feedback for every action
+
+### MINDBEAT — the on-device intelligence (v3.0+)
+Every play, skip, like and download becomes **graded evidence** in a local
+event ledger, and the app learns from it:
+
+| Surface | What it does |
+|---|---|
+| **Smart Shuffle v2** | AI picks interleaved into your queue, vibe-locked to the current session; skipping a rec re-seeds the next one away from what you rejected ("it's listening back") |
+| **Autoplay Radio v2** | When the queue runs dry, a multi-seed station keeps playing — even with the UI killed — drifting between mood cells inside your artist clusters |
+| **Daily Mixes v2** | Cluster-cross mixes (artist cluster × mood cell) with a 60/25/15 core/bridge/fresh split, re-ranked nightly and after every third session |
+| **Now Sound (daylist)** | A time-aware playlist: your 11pm and your 11am get different names and different tracks ("Midnight Riyaz", "Gym-time Bhangra") |
+| **On the Rise** | Seed-of-seed discovery: neighbors of your co-play neighbors, filtered to never-played tracks, each with an honest "via artist" chain |
+| **AI Playlist Generator** | Type a vibe ("Punjabi gym bangers", "90s heartbreak Bollywood", Hinglish works) → five-stage pipeline (Understand → Hunt → Curate → Polish → Narrate) → 25-track playlist with a name and description |
+| **Vibe Search** | The search bar's NLP mode: "songs like kun faya kun", typo-tolerant ("sahd songs"), intent chips on the results |
+| **Your Sound v2** | Wrapped-grade stats with the industry 30-second rule, listening clock, streaks and skip profile |
+| **Taste DNA** | The transparency screen: see the entire model — affinity weights, the daypart matrix, exploration budget — and act on it (Boost / Mute / Not-for-me / export JSON / kill switch) |
+
+Every recommendation carries a **truthful reason line** from a closed code
+set — the app never invents an explanation. See
+[docs/MINDBEAT.md](docs/MINDBEAT.md) for the full six-layer architecture.
+
+### First-run onboarding (v3.2)
+Spotify-faithful three-step flow:
+1. **"What's your name?"** — powers the "Made for {name}" shelf
+2. **"Choose 3 or more artists you like."** — **real artist photos**
+   (48 verified A-lister seeds + unbounded "More" batches across 8 live
+   categories + artist search), circular avatars with white-ring selection
+3. **"What kind of music do you like?"** — colorful genre tiles
+
+Completion is **permanent**: the flag is dual-written (SQLite + AsyncStorage)
+before the flow closes, and a mid-flow kill resumes instead of restarting.
+Your picks seed the taste profile immediately.
+
+### The interface
+- Authentic Spotify Android design language, pixel-verified against
+  genuine reference screenshots (green-active filter chips, 8-tile shortcut
+  grid, #282828 mini-player card, plain-white play glyph, 4-tab bar with
+  Premium)
+- **The app repaints itself per song**: artwork colors are extracted in
+  pure JS (jpeg-js quantizer, no native module) and drive the player
+  gradient, collection headers and accent surfaces
+- **Deep Home feed**: shortcuts → Made for {name} → Now Sound → Jump back
+  in → Popular artists (real-photo rail) → Trending → On the Rise →
+  Because you listened → New releases → Featured playlists → charts
+  — JioSaavn's editorial feed keeps the screen populated from the very
+  first session
+- Search: Spotify's Top-result hero card over a Songs list, 18-category
+  Browse grid, recent searches, Keyword|Vibe toggle
+- Library: playlists / artists / albums / downloaded filters, list⇄grid
+  view toggle, Liked Songs gradient hero
+- "What's new" dialog on every update + an on-screen version badge, so
+  releases are visibly verifiable on the device
 
 ### Content safety
-Explicit/abusive content never appears on Home or any algorithmic
-surface: provider explicit flags + a word-boundary profanity blocklist
-(EN + Hindi/Punjabi). Search results (user intent) show an "E" badge
-instead.
+Explicit/abusive content never appears on Home or any algorithmic surface:
+provider explicit flags plus a word-boundary profanity blocklist
+(English + Hindi/Punjabi romanized). Search results honor user intent and
+show an "E" badge instead. The filter is tested against a dodge corpus.
 
-### Player
-320 kbps playback, background audio with notification/lock-screen
-controls, stale-URL auto-recovery, play next / add to queue / remove
-from queue, play counts, downloads for offline.
+### Privacy
+- The ledger stores **no URLs, device ids or identifiers** (verifier-tested)
+- Everything lives in app-private storage; nothing is uploaded anywhere
+- Kill switch: disable all recommendations (persists across restarts);
+  export or reset the model from Taste DNA
 
-## Build
+---
 
-GitHub Actions (`.github/workflows/native-android.yml`) stamps the
-version, prebuilds the native project and produces a signed release
-APK on every push to `main`; tags (`v*`) publish a GitHub Release.
+## Project map
+
+```
+App.tsx                    App shell — tabs, stack, providers
+src/
+  screens/                 Home, Search, Library, Premium, Player,
+                           Collection, Playlist, AI, Stats (Your Sound),
+                           Taste (Taste DNA)
+  components/              Onboarding, WhatsNewDialog, MiniPlayer,
+                           TrackRow/TrackMenu, Shelf, Artwork, Toast, …
+  ai/
+    mindbeat.ts            The single intelligence entry point (facade)
+    core/                  L1 ledger · L2 profile · L3 session brain ·
+                           L4 decision engine · proxy features · priors ·
+                           SQLite/memory stores · the tuning table
+    surfaces/              Smart Shuffle, Radio, Daily Mixes, Now Sound,
+                           On the Rise, AI Playlist v2, Vibe Search
+    engine.ts, generator   v2.1 legacy surfaces (kept as fallback layer)
+  api/                     saavn.ts (DES stream decrypt) · artists.ts
+                           (real artist photos) · music.ts · itunes.ts
+  player/                  PlayerProvider + background service
+  storage/                 AsyncStorage store + download manager
+  theme/                   Dynamic palette engine + provider
+  safety.ts                Content-safety filter
+  webmocks/                Web-only fixture layer for the device lab
+tests/ai/                  74 replay tests incl. perf budgets + gauntlet
+                           regression locks
+scripts/                   Device lab (Playwright), APK verifiers, icon
+                           generators, screenshot packager
+ci/                        Gradle signing patch for CI
+docs/                      Architecture, MINDBEAT, development, changelog
+```
+
+Full details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Build & run
 
 ```bash
 bun install
-bun run typecheck
-bunx expo start        # dev
-bunx expo run:android  # native build
+bun run typecheck        # tsc --noEmit (strict)
+bun test                 # 74 AI replay tests incl. latency budgets
+bunx expo start          # dev server
+bunx expo run:android    # native debug build
 ```
+
+### Release (CI)
+
+GitHub Actions (`.github/workflows/native-android.yml`) on every push to
+`main`: stamps a monotonic `versionCode`, runs `expo prebuild`, builds a
+**signed release APK** from the secret keystore and attaches it as an
+artifact. Pushing a `v*` tag publishes a GitHub Release.
+
+```bash
+git tag v3.3.0 && git push origin v3.3.0   # → release APK in ~15 min
+```
+
+APKs are deep-verified after each release (manifest version probe, Hermes
+bundle markers, webmock-leak check — `scripts/verify_v32_apk.py` is the
+latest example).
+
+### Visual QA — the device lab
+
+```bash
+bash scripts/lab.sh
+```
+
+Boots Expo web with react-native-web, redirects the data/player layers to
+fixtures (`src/webmocks/` + `metro.config.js` — **Android builds are
+unaffected**), then runs a Playwright walkthrough on hardware-faithful
+Pixel 7 and iPhone 13 viewports: onboarding → reload-persistence
+regression → deep home scroll → search → player → queue. Screenshots land
+in `screenshots/`; `scripts/package_ui_shots.py` builds the browsable
+gallery committed at `download/tsf-ui-screenshots/`.
+
+## Documentation
+
+| Doc | Contents |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Module map, data flow, playback pipeline, theming, persistence, web harness |
+| [docs/MINDBEAT.md](docs/MINDBEAT.md) | The six-layer intelligence stack, surfaces, reason codes, tuning, privacy |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Workflow, device lab, gauntlet loop, testing, release process, conventions |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | Release history v2.0 → v3.2.0 |
 
 ## Stack
 
 React Native 0.76 · Expo SDK 52 (prebuild, bare workflow) ·
-react-native-track-player · expo-blur / haptics / linear-gradient /
-font · crypto-js (DES stream decryption) · TypeScript strict.
+react-native-track-player 4.1.1 · expo-sqlite (event ledger) ·
+@react-native-async-storage/async-storage · expo-linear-gradient /
+haptics / font / file-system · crypto-js (DES stream decryption) ·
+jpeg-js (artwork color extraction) · Figtree typography ·
+TypeScript strict · Bun.

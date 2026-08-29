@@ -9,9 +9,14 @@ ios/
 .DS_Store
 upload/
 agent-ctx/
-scripts/
-docs/
 tool-results/
+
+# one-off script artifacts — the tooling itself IS tracked
+# (the old blanket scripts/ ignore is what lost the device lab once)
+scripts/*.apk
+scripts/apk*/
+scripts/icon_variants/
+scripts/artist_seeds.ts.txt
 
 # device lab artifacts (regenerate with: bash scripts/lab.sh)
 screenshots/

@@ -523,3 +523,51 @@ Stage Summary:
 - User screenshots: download/tsf-ui-screenshots/ (19 states × 2 devices,
   side-by-side pairs, UI-Gallery.html)
 - Reminder: user rotates GitHub token after session
+
+---
+Task ID: 7 (session 2026-08-29, part 6)
+Agent: Super Z (main agent)
+Task: Documentation overhaul (user: "update a complete read me and the documentation — the codebase is up to date but the documentation and read me is not")
+
+Work Log:
+- Audited doc state: README.md still documented v2.1 (11 releases behind);
+  no docs/ existed (and docs/ was blanket-gitignored — same footgun class
+  that lost the device lab once); package.json version stuck at 2.1.0
+  while app.json/CI ship 3.2.0
+- Re-read the full codebase surface to document truth: App.tsx shell,
+  all 10 screens + 9 components, api layer (saavn/artists/music/itunes),
+  player pipeline, MINDBEAT core (ledger/profile/session/decision/
+  features/priors/constants) + 8 surfaces, storage map, theme engine,
+  safety, webmocks harness, CI workflow, lab tooling, 74-test suite
+- Gates re-verified before writing: tsc --noEmit CLEAN, bun test 74/74
+- NEW README.md (full rewrite for v3.2): standalone/privacy contract,
+  player + MINDBEAT surface table, onboarding, interface, safety,
+  project map, build/run, release, device lab, doc index, stack
+- NEW docs/ARCHITECTURE.md: system diagram, app shell, providers,
+  playback pipeline, theming, persistence map, safety, web-harness
+  redirect table, screen inventory, CI topology
+- NEW docs/MINDBEAT.md: six-layer deep dive with the real grade
+  weights, half-lives, score weights, exploration budget, cadences,
+  reason-code table with hard conditions, perf budgets vs measured,
+  verification story
+- NEW docs/DEVELOPMENT.md: prerequisites, commands, device lab (28
+  checks = 14 checkpoints × 2 devices, verified against the script),
+  gauntlet methodology, release + verification process, house rules,
+  troubleshooting
+- NEW docs/CHANGELOG.md: v1.x → v3.2.0 from the worklog history
+- .gitignore fixed: docs/ un-ignored; scripts/ blanket ignore replaced
+  with targeted artifact ignores (*.apk, apk*/, icon_variants/,
+  artist_seeds.ts.txt) so tooling is trackable by default — one-off
+  scripts (icon generators, artist harvester, probers) now visible
+- package.json version 2.1.0 → 3.2.0 (metadata sync with app.json)
+- False alarm resolved: metro.config.js "corruption" was the terminal
+  eating [m sequences as ANSI codes — od + node parse proved the file
+  valid; documented nothing broken
+
+Stage Summary:
+- Documentation now matches the v3.2.0 codebase: 1 README + 4 docs
+  (architecture / intelligence / development / changelog), all written
+  from verified source reads, every number cross-checked against
+  constants.ts and the test suite
+- Repo hygiene: docs + scripts trackable, version metadata consistent
+- No code changes; tsc clean, 74/74 tests green after the metadata bump

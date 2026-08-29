@@ -1,0 +1,30 @@
+{
+  "success": true,
+  "query": "Spotify app icon green circle logo closeup",
+  "count": 3,
+  "ranked": false,
+  "captioned_count": 0,
+  "results": [
+    {
+      "original_url": "https://z-cdn.chatglm.cn/image-search-mcp/images-ppt/bca84773eeae.jpg",
+      "caption": "",
+      "source": "Dreamstime.com",
+      "original_width": "1600px",
+      "original_height": "963px"
+    },
+    {
+      "original_url": "https://z-cdn.chatglm.cn/image-search-mcp/images-ppt/d8e456457fa0.jpg",
+      "caption": "",
+      "source": "Alamy",
+      "original_width": "1300px",
+      "original_height": "977px"
+    },
+    {
+      "original_url": "https://z-cdn.chatglm.cn/image-search-mcp/images-ppt/dd17d34de782.jpg",
+      "caption": "",
+      "source": "TechRadar",
+      "original_width": "1500px",
+      "original_height": "1125px"
+    }
+  ]
+}
