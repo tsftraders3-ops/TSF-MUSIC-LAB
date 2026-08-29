@@ -320,3 +320,57 @@ Stage Summary:
 - v3.0.0 = MINDBEAT: the app now learns from every play/skip/like (graded evidence), reads the room (vibe machine), heals its own queues, explains every recommendation truthfully, and wraps it in Wrapped-grade stats — 100% on-device
 - First launch shows Pick-5 onboarding + the 3.0.0 What's-new dialog; Taste DNA reachable from Your Sound
 - Reminder: user rotates GitHub token after session
+
+---
+Task ID: 4 (session 2026-08-29, part 2)
+Agent: Super Z (main agent)
+Task: Autonomous visual-testing platform (user: "install an emulator or any platform… test the app how it is looking… act as a native Android/iOS developer") + UI QA loop on top of v3.0.0.
+
+Work Log:
+- Environment research: no /dev/kvm (emulator infeasible), 2 CPU/4GB → chose
+  Expo web (react-native-web) + Playwright device emulation as the "emulator".
+- Discovered local checkout was stale (pre-v2.4); remote main = v3.0.0 with
+  webmocks foundation (in-memory player, fixture APIs, localStorage seed) but
+  NO browser automation. Preserved stale work on branch backup/lab-stale,
+  reset to origin/main, and ported the lab on top of v3.0.0's webmocks.
+- Built the device lab:
+  • scripts/device_lab.py — Playwright Pixel 7 + iPhone 13 walkthrough:
+    WhatsNew dialog, Pick-5 onboarding, home (3 scroll depths), AI playlist
+    (empty → prompt → staged generation → result), library, Your Sound stats,
+    Taste DNA, search keyword results, Premium, collection, AI playlist
+    detail, full player playing/paused, queue sheet — 16 states × 2 devices,
+    32/32 green, zero console errors.
+  • scripts/lab.sh — one-shot orchestrator (sandbox kills background
+    processes between invocations, so Metro lives only inside one run);
+    hardened 480s Metro readiness gate + 4-attempt boot retry.
+  • window.__TsfMock control plane appended to src/webmocks/trackPlayer.ts
+    (seek/force/snapshot) for deterministic player states.
+  • testIDs added (additive): track-row, mini-player, player-dismiss,
+    player-queue-btn, shelf-card (PressableScale forwards via ...rest).
+- VLM-driven design review loop on the captured screenshots (3 review
+  batches + verification passes) caught TWO REAL BUGS, both fixed:
+  1. StatsScreen ladder bug (§10.4 violation): `ledger?.minutes ?? legacy…`
+     kept 0 from a resolved-but-empty ledger (0 is not nullish) → hero stats
+     showed 0 min/0 streams/0 songs while top-artists list showed 23/18/15
+     plays. Fixed with explicit ledgerUsable maturity check; verified in lab:
+     hero now 5h 49m · 93 streams · 8 songs, consistent with the list.
+     (Affects real users upgrading from v2.5 with legacy playCounts.)
+  2. LibraryScreen footer hardcoded "Version 2.5.0" (stale under v3.0.0) →
+     now reads Constants.expoConfig.version (single source of truth).
+- Verified NOT bugs (intentional design): artwork-tinted gradient cards
+  (dynamic palette), green filter chip (pixel-verified vs real Spotify per
+  code comment), uniform Taste DNA bars in harness (bar math is relative-to-
+  max; harness profile has uniform weights — harness-data gap, noted below).
+- Regression safety: bun test 74/74 pass; tsc clean; all lab infra is
+  web-gated (metro platform==='web' redirects only).
+
+Stage Summary:
+- The app now has a repeatable "look at itself" loop: bash scripts/lab.sh →
+  screenshots/ + report.json → VLM critique → fix → re-run. Verified on the
+  full v3.0.0 surface incl. the AI generation pipeline (prompt → staged
+  narration → "Road Trip, 12 songs" result).
+- Bugs fixed: stats ladder contradiction, stale version footer.
+- Known harness gaps (future): seed ledger events (not just playCounts) so
+  Taste DNA/Daily Mixes show realistic variance; WebKit engine for closer
+  iOS fidelity; queue-sheet modal edge is an RNW rendering artifact (native
+  slide animation is correct).

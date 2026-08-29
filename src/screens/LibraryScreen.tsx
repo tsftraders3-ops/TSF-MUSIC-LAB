@@ -9,6 +9,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
+import Constants from 'expo-constants';
 import {
   FlatList,
   Modal,
@@ -451,7 +452,9 @@ export function LibraryScreen() {
         contentContainerStyle={
           grid ? { paddingBottom: 170, gap: 14, paddingTop: 4 } : { paddingBottom: 170, flexGrow: 1 }
         }
-        ListFooterComponent={<Text style={styles.version}>Version 2.5.0</Text>}
+        ListFooterComponent={
+          <Text style={styles.version}>Version {Constants.expoConfig?.version ?? '3.0.0'}</Text>
+        }
         ListEmptyComponent={
           chip === 'playlists' ? null : (
             <View style={styles.empty}>

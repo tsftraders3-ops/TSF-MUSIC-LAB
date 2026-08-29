@@ -293,3 +293,27 @@ export function useTrackPlayerEvents(_events: unknown[], handler: (e: any) => vo
 }
 
 export { repeatMode, shuffle };
+
+/* ── device-lab control plane (browser harness only) ──────────────────
+ * Playwright drives deterministic player states through window.__TsfMock
+ * before capturing screenshots. Never referenced by app code.          */
+if (typeof window !== 'undefined') {
+  (window as any).__TsfMock = {
+    seek(seconds: number) {
+      position = Math.max(0, Math.min(seconds, duration || seconds));
+    },
+    force(state: 'playing' | 'paused') {
+      playing = state === 'playing';
+    },
+    snapshot() {
+      return {
+        queueLength: queue.length,
+        index: activeIndex,
+        position,
+        duration,
+        playing,
+        title: queue[activeIndex]?.title ?? null,
+      };
+    },
+  };
+}

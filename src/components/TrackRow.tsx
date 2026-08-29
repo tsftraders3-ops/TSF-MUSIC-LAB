@@ -114,6 +114,7 @@ export function TrackRow({
     <Pressable
       onPress={onPress}
       onLongPress={onLongPress}
+      testID="track-row"
       delayLongPress={280}
       android_ripple={{ color: colors.elevated }}
       style={({ pressed }) => [styles.row, style, pressed && { opacity: 0.75 }]}

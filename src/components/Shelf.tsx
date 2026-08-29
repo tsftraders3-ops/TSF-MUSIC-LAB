@@ -40,6 +40,7 @@ export function ShelfCard({
     <PressableScale
       onPress={onPress}
       onLongPress={onLongPress}
+      testID="shelf-card"
       style={{ width: size, gap: 8 }}
       haptic
     >

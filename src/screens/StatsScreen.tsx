@@ -86,14 +86,25 @@ export function StatsScreen() {
   useEffect(() => {
     (async () => {
       // Ledger truth first (§9.7); v2.1 play counts fill the gaps.
+      // Ladder rule (§10.4 — never emptier than before): a *resolved but
+      // empty* ledger (fresh install / upgrade) must NOT zero out numbers
+      // that legacy play counts can still provide. `??` alone can't do
+      // this — 0 is not nullish — so maturity is decided explicitly.
       const [ledger, legacy] = await Promise.all([
         mindbeat.stats().catch(() => null as MindbeatStats),
         getStats().catch(() => null as ListeningStats | null),
       ]);
+      const ledgerUsable = !!ledger && (ledger.streams ?? 0) > 0;
       const merged: Merged = {
-        minutes: ledger?.minutes ?? legacy?.minutesEstimate ?? 0,
-        streams: ledger?.streams ?? legacy?.totalPlays ?? 0,
-        songs: ledger?.topTracks.length ?? legacy?.distinctTracks ?? 0,
+        minutes: ledgerUsable
+          ? (ledger!.minutes ?? 0)
+          : (legacy?.minutesEstimate ?? ledger?.minutes ?? 0),
+        streams: ledgerUsable
+          ? (ledger!.streams ?? 0)
+          : (legacy?.totalPlays ?? ledger?.streams ?? 0),
+        songs: ledgerUsable
+          ? (ledger!.topTracks?.length ?? 0)
+          : (legacy?.distinctTracks ?? ledger?.topTracks?.length ?? 0),
         topArtists: (ledger?.topArtists?.length ? ledger.topArtists : legacy?.topArtists ?? []).map((a) => ({
           artist: a.artist,
           plays: a.plays,
@@ -102,10 +113,10 @@ export function StatsScreen() {
         topTracks: (ledger?.topTracks?.length
           ? ledger.topTracks
           : (legacy?.topTracks ?? []).map((e) => ({ track: e.track, plays: e.count }))),
-        byHour: ledger?.byHour,
-        streakDays: ledger?.streakDays,
-        skipRate: ledger?.skipRate,
-        sessions: ledger?.sessions,
+        byHour: ledgerUsable ? ledger?.byHour : undefined,
+        streakDays: ledgerUsable ? ledger?.streakDays : undefined,
+        skipRate: ledgerUsable ? ledger?.skipRate : undefined,
+        sessions: ledgerUsable ? ledger?.sessions : undefined,
       };
       setStats(merged);
     })();

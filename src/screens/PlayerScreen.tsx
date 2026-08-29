@@ -207,7 +207,7 @@ export function PlayerScreen() {
       >
         {/* ── top bar: collapse + more ─────────────────────────────── */}
         <View style={styles.topRow}>
-          <Pressable hitSlop={12} onPress={() => nav.goBack()}>
+          <Pressable hitSlop={12} onPress={() => nav.goBack()} testID="player-dismiss">
             <Ionicons name="chevron-down" size={30} color={colors.text} />
           </Pressable>
           <Pressable hitSlop={12} onPress={() => setShowMore(true)}>
@@ -325,7 +325,7 @@ export function PlayerScreen() {
             <PressableScale hitSlop={8} onPress={onShare}>
               <Ionicons name="share-outline" size={21} color={colors.text} />
             </PressableScale>
-            <PressableScale hitSlop={8} onPress={() => setShowQueue(true)}>
+            <PressableScale hitSlop={8} onPress={() => setShowQueue(true)} testID="player-queue-btn">
               <Ionicons name="list" size={22} color={colors.text} />
             </PressableScale>
           </View>

@@ -30,6 +30,7 @@ export function MiniPlayer() {
         style={({ pressed }) => [styles.row, pressed && { opacity: 0.8 }]}
         android_ripple={{ color: 'rgba(255,255,255,0.06)' }}
         onPress={() => nav.navigate('Player')}
+        testID="mini-player"
       >
         <Artwork uri={active.artwork} seed={active.id} size={40} variant="mini" />
         <Text style={styles.title} numberOfLines={1}>
