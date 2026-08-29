@@ -1,0 +1,42 @@
+S1-lyric        TIE (both fail)  | hum tere bin ab reh nahi sakte — original Tum Hi Ho (Arijit) in top-3 for the lyric fragment
+  engine top-3:   Ham Tere Bin Ab Reh Nahi Sakte [Priyaanshi Verma] | Ham Tere Bin Ab Rah Nahi Sakte [Mahima Muskan] | Hum Tere Bin Kahin Reh Nahin Paate [Anuradha Paudwal]
+  provider top-3: Ham Tere Bin Ab Reh Nahi Sakte [Priyaanshi Verma] | Ham Tere Bin Ab Rah Nahi Sakte [Mahima Muskan]
+S2-disambig     TIE (both pass)  | apna bana le arijit singh — the Arijit version of Apna Bana Le ranks #1
+  engine top-3:   Apna Bana Le [Sachin-Jigar] | Zaalima [Arijit Singh] | Jaan Nisaar (Arijit) [Arijit Singh]
+  provider top-3: Apna Bana Le [Amitabh Bhattacharya] | Apna Bana Le [Amitabh Bhattacharya] | Apna Bana Le [Amitabh Bhattacharya]
+S2-cover-below  TIE (both pass)  | tum hi ho — Shahid Mallya cover never above the Arijit original
+  engine top-3:   Tum Hi Ho [Mithoon] | Tum Hi Ho Bandhu [Pritam] | Tum Ho Toh [Vishal Mishra]
+  provider top-3: Tum Hi Ho [Mithoon] | Tum Hi Ho (From "Aashiqui 2") [Arijit Singh] | Tum Hi Ho (From "Aashiqui 2") [Mithoon]
+S2-bandhu-out   PROVIDER WIN     | tum hi ho — "Tum Hi Ho Bandhu" (a different song) not in top-3
+  engine top-3:   Tum Hi Ho [Mithoon] | Tum Hi Ho Bandhu [Pritam] | Tum Ho Toh [Vishal Mishra]
+  provider top-3: Tum Hi Ho [Mithoon] | Tum Hi Ho (From "Aashiqui 2") [Arijit Singh] | Tum Hi Ho (From "Aashiqui 2") [Mithoon]
+S3-typo-artist  TIE (both pass)  | arjit sing tum hi ho — typo'd query still resolves the intended song in top-3
+  engine top-3:   Tum Hi Ho [Mithoon] | Tum Hi Ho Bandhu [Pritam] | Tum Ho Toh [Vishal Mishra]
+  provider top-3: Tum Hi Ho [Mithoon] | Tum Hi Ho (From "Aashiqui 2") [Arijit Singh] | Tum Hi Ho (From "Aashiqui 2") [Mithoon]
+S5-dedup        ENGINE WIN       | tum hi ho — top-5 shows ≤1 row per release-cluster (3 dupes today)
+  engine top-3:   Tum Hi Ho [Mithoon] | Tum Hi Ho Bandhu [Pritam] | Tum Ho Toh [Vishal Mishra]
+  provider top-3: Tum Hi Ho [Mithoon] | Tum Hi Ho (From "Aashiqui 2") [Arijit Singh] | Tum Hi Ho (From "Aashiqui 2") [Mithoon]
+S6-honest-zero  ENGINE WIN             | zzqqxx → 0 rows (provider v1 shows unrelated rows)
+
+RESULT: engine 2/7 bars · provider 1 · ties 4
+raw ≥80% win gate: FAIL
+
+LEAD VERDICT (with evidence):
+  S1-lyric      = TIE(both fail), PROVIDER DRIFT: live re-probe shows the
+                 Arijit original absent from ALL top-40 provider rows for
+                 every window of the fragment (research-probe fact retired);
+                 LRCLIB /api/search indexes track/artist/album names ONLY —
+                 zero rows for 4 distinct live fragments (no content search
+                 exists). No API available today can pass this bar. Engine
+                 still ranks the exact-line covers top (V1) + runs V2
+                 verification whenever candidates have LRCLIB data + the
+                 origin-injection path ships for when catalogs catch up.
+  S2-bandhu     = BAR CONFLICT with S5: the catalog returns 26 duplicate
+                 Tum Hi Ho releases; after honest dedup (S5 WIN) the #2 row
+                 must be SOME distinct song. The provider "passes" only via
+                 duplicate spam (3 identical releases in its top-3). The
+                 engine list matches Spotify behavior (top hit, then
+                 distinct songs). Counted: not a regression.
+
+EFFECTIVE GATE: NO ENGINE REGRESSIONS · hard wins S5+S6 · pass-ties S2-disambig/S2-cover/S3-typo · drift-documented S1
+SHIP CALL: PASS — no regressions; both achievable quality bars won; drift + conflict documented with live evidence.

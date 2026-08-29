@@ -19,7 +19,10 @@ const BROWSER_HEADERS: Record<string, string> = {
   Accept: 'application/json, text/plain, */*',
 };
 
-export async function saavnGet(params: Record<string, string>): Promise<any> {
+export async function saavnGet(
+  params: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<any> {
   const qs = new URLSearchParams({
     _format: 'json',
     _marker: '0',
@@ -29,6 +32,7 @@ export async function saavnGet(params: Record<string, string>): Promise<any> {
   });
   const res = await fetch(`${API}?${qs.toString()}`, {
     headers: BROWSER_HEADERS,
+    signal,
   });
   if (!res.ok) throw new Error(`saavn ${res.status}`);
   const text = await res.text();
@@ -113,16 +117,40 @@ function mapSaavnSong(raw: any): Track | null {
   const id = raw?.id ?? mi?.id;
   const enc = mi?.encrypted_media_url ?? raw?.encrypted_media_url;
   if (!id || !enc) return null;
-  const primaryArtist = mi?.artistMap?.primary_artists?.[0];
+  const artistMap = mi?.artistMap ?? {};
+  const primaryList: any[] = Array.isArray(artistMap.primary_artists)
+    ? artistMap.primary_artists
+    : [];
+  const featuredList: any[] = Array.isArray(artistMap.featured_artists)
+    ? artistMap.featured_artists
+    : [];
+  // v2 display fix: the FULL primary list is the artist string — fixes
+  // "Apna Bana Le" showing only its lyricist. Fallback chain keeps v1
+  // behavior for rows without artistMap.
+  const artistsFull = primaryList
+    .map((a) => (typeof a?.name === 'string' ? decodeEntities(a.name) : ''))
+    .filter(Boolean);
+  const primaryArtist = primaryList[0];
   const artist =
-    primaryArtist?.name ||
-    mi?.primary_artists ||
-    raw?.subtitle ||
-    'Unknown artist';
+    artistsFull.length > 0
+      ? artistsFull.join(', ')
+      : primaryArtist?.name ||
+        mi?.primary_artists ||
+        raw?.subtitle ||
+        'Unknown artist';
   return {
     id: `saavn-${id}`,
     title: decodeEntities(raw?.title ?? mi?.title ?? 'Unknown'),
     artist: decodeEntities(String(artist)),
+    artistsFull: artistsFull.length ? artistsFull : undefined,
+    featuredArtists: featuredList
+      .map((a) => (typeof a?.name === 'string' ? decodeEntities(a.name) : ''))
+      .filter(Boolean),
+    hasLyrics: truthyExplicit(mi?.has_lyrics) || undefined,
+    lyricsSnippet:
+      typeof mi?.lyrics_snippet === 'string' && mi.lyrics_snippet
+        ? decodeEntities(mi.lyrics_snippet)
+        : undefined,
     album: mi?.album ?? raw?.album ?? undefined,
     albumId: String(mi?.album_id ?? raw?.album_id ?? '') || undefined,
     artistId: primaryArtist?.id ? String(primaryArtist.id) : undefined,
@@ -136,16 +164,28 @@ function mapSaavnSong(raw: any): Track | null {
     explicit: truthyExplicit(mi?.explicit_content ?? raw?.explicit_content),
     language: String(mi?.language ?? raw?.language ?? '').toLowerCase() || undefined,
     year: parseInt(mi?.year ?? raw?.year ?? '0', 10) || undefined,
+    playCount: Number(raw?.play_count ?? mi?.play_count ?? 0) || undefined,
+    releaseDate:
+      typeof (mi?.release_date ?? raw?.release_date) === 'string'
+        ? (mi?.release_date ?? raw?.release_date)
+        : undefined,
   };
 }
 
-export async function searchSaavn(query: string, limit = 30): Promise<Track[]> {
-  const data = await saavnGet({
-    __call: 'search.getResults',
-    q: query,
-    p: '1',
-    n: String(limit),
-  });
+export async function searchSaavn(
+  query: string,
+  limit = 30,
+  signal?: AbortSignal,
+): Promise<Track[]> {
+  const data = await saavnGet(
+    {
+      __call: 'search.getResults',
+      q: query,
+      p: '1',
+      n: String(limit),
+    },
+    signal,
+  );
   const results = Array.isArray(data?.results) ? data.results : [];
   return results.map(mapSaavnSong).filter(Boolean) as Track[];
 }
@@ -268,4 +308,69 @@ export async function getTrending(limit = 14): Promise<Track[]> {
 /** Clean-collection check for chart shelves on home. */
 export function collectionIsClean(c: Collection): boolean {
   return isClean({ title: c.title, artist: c.subtitle });
+}
+
+// ── SEARCH V2 additions (§5.2 of the refactor plan) ────────────────────
+
+export interface SuggRow {
+  id: string;
+  title: string;
+  subtitle?: string;
+  image?: string;
+  type: string;
+}
+
+export interface AutocompleteBundle {
+  songs: SuggRow[];
+  albums: SuggRow[];
+  artists: SuggRow[];
+  playlists: SuggRow[];
+  topQuery?: SuggRow;
+}
+
+function mapSugg(rows: any): SuggRow[] {
+  const list = Array.isArray(rows?.data) ? rows.data : [];
+  return list
+    .filter((r: any) => r?.title && r?.type)
+    .map((r: any) => ({
+      id: String(r.id ?? ''),
+      title: decodeEntities(String(r.title)),
+      subtitle: r.subtitle ? decodeEntities(String(r.subtitle)) : undefined,
+      image: r.image ? art500(r.image) : undefined,
+      type: String(r.type ?? ''),
+    }))
+    .filter((r: SuggRow) => r.id);
+}
+
+/**
+ * Provider typeahead (autocomplete.get — note `query=`, not `q=`).
+ * Opportunistic by design: every section failure degrades to [].
+ */
+export async function getAutocomplete(
+  query: string,
+  signal?: AbortSignal,
+): Promise<AutocompleteBundle> {
+  const data = await saavnGet(
+    { __call: 'autocomplete.get', query },
+    signal,
+  );
+  const topQ = mapSugg(data?.topquery);
+  return {
+    songs: mapSugg(data?.songs).slice(0, 6),
+    albums: mapSugg(data?.albums).slice(0, 4),
+    artists: mapSugg(data?.artists).slice(0, 4),
+    playlists: mapSugg(data?.playlists).slice(0, 4),
+    topQuery: topQ[0],
+  };
+}
+
+/** Resolve an autocomplete/topquery song id into a playable Track. */
+export async function getSongById(songId: string, signal?: AbortSignal): Promise<Track | null> {
+  try {
+    const data = await saavnGet({ __call: 'song.getDetails', pids: songId }, signal);
+    const songs = Array.isArray(data?.songs) ? data.songs : data ? [data] : [];
+    return mapSaavnSong(songs[0]);
+  } catch {
+    return null;
+  }
 }

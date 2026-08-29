@@ -229,6 +229,51 @@ class Mindbeat {
     await this.ledger?.searchClicked(trackId, rank);
   }
 
+  /** SEARCH V2 (§5.6) — correlated, joinable search evidence.
+   *  Kill-switch honored (§5.6: intelligenceDisabled pauses S5 writes). */
+  async searchQueriedV2(p: {
+    query: string;
+    normalized: string;
+    resultCount: number;
+    planKind: string;
+    probes: string[];
+    latencyMs: number;
+    corrections: Array<{ from: string; to: string }>;
+    correlationId: string;
+  }): Promise<void> {
+    if (!this.ledger || this.disabled) return;
+    await this.ledger.searchQueriedV2(p);
+  }
+
+  async searchClickedV2(p: {
+    trackId: string;
+    rankInResults: number;
+    query: string;
+    normalizedQuery: string;
+    correlationId: string;
+    lyricVerified?: boolean;
+  }): Promise<void> {
+    if (!this.ledger || this.disabled) return;
+    await this.ledger.searchClickedV2(p);
+  }
+
+  /** Raw-event reader for the search learning loop (S5). */
+  async eventsSince(ts: number): Promise<
+    Array<{ type: string; ts: number; trackId?: string; payload: Record<string, unknown> }>
+  > {
+    if (!this.ledger) return [];
+    try {
+      return await this.ledger.getEventsSince(ts);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Sync kill-switch read for the search engine deps (S5). */
+  recsDisabled(): boolean {
+    return this.disabled;
+  }
+
   /** Ledger passthrough for the background service. */
   get ledgerApi(): EventLedger | null {
     return this.ledger;

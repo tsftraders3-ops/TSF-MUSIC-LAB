@@ -19,8 +19,12 @@ const WEB_MODULE_ALIASES = {
 
 const WEB_PATH_REDIRECTS = [
   { suffix: path.join('src', 'api', 'saavn.ts'), to: path.join(projectRoot, 'src/webmocks/saavn.ts') },
-  { suffix: path.join('src', 'api', 'music.ts'), to: path.join(projectRoot, 'src/webmocks/music.ts') },
+  // SEARCH V2: the REAL engine orchestrator runs on web — its deps all
+  // redirect below, so the lab exercises the true S0→S5 pipeline.
+  { suffix: path.join('src', 'api', 'itunes.ts'), to: path.join(projectRoot, 'src/webmocks/itunes.ts') },
   { suffix: path.join('src', 'api', 'artists.ts'), to: path.join(projectRoot, 'src/webmocks/artists.ts') },
+  // SEARCH V2: LRCLIB lyric verification → fixture lyrics (lab parity)
+  { suffix: path.join('src', 'api', 'lrclib.ts'), to: path.join(projectRoot, 'src/webmocks/lrclib.ts') },
   // MINDBEAT: the SQLite ledger store has no web build — the in-memory
   // store exports the same createLedgerStore() signature (harness parity).
   { suffix: path.join('src', 'ai', 'core', 'storeSqlite.ts'), to: path.join(projectRoot, 'src/ai/core/storeMemory.ts') },

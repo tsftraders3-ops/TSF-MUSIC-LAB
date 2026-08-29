@@ -32,6 +32,21 @@ export interface Track {
   reasonCode?: string;
   /** True when this serve came from an exploration slot (§8.4) */
   exploration?: boolean;
+  /** SEARCH V2 (§8): full primary-artist list for matching/display */
+  artistsFull?: string[];
+  featuredArtists?: string[];
+  hasLyrics?: boolean;
+  /** First lyric line from the provider — free V1 verification signal */
+  lyricsSnippet?: string;
+  releaseDate?: string;
+  playCount?: number;
+  /** Set by S2 when the track was verified against typed lyrics */
+  lyricMatch?: boolean;
+  matchedLine?: string;
+  /** Version-cluster size (S2): "+N versions" affordance */
+  versionCount?: number;
+  /** Which search plan kind surfaced this row */
+  planKind?: string;
   /** Local downloaded file URI (documentDirectory path) */
   localUri?: string;
   /** Provider explicit flag (kept for search badges; filtered off home) */

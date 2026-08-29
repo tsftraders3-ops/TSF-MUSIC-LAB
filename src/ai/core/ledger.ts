@@ -40,9 +40,17 @@ export interface TrackStartMeta {
 }
 
 let idCounter = 0;
+/**
+ * Monotonic under STRING comparison (store tiebreaks sort by id text):
+ * the counter is zero-padded base-36, so "…-000z" < "…-0010" always.
+ * 36^4 = 1.68M same-ms events before degradation (cap is 20k total —
+ * unreachable). Found by the Search V2 gauntlet: unpadded ids reordered
+ * same-timestamp events once the counter passed 35 ("z" → "10") and
+ * broke crash recovery. LOCKED by tests/ai/search_rank.test.ts R-LOCK-1.
+ */
 function nextId(ts: number): string {
-  idCounter = (idCounter + 1) % 0xffff;
-  return `${ts.toString(36)}-${idCounter.toString(36)}`;
+  idCounter += 1;
+  return `${ts.toString(36)}-${idCounter.toString(36).padStart(4, '0')}`;
 }
 
 export class EventLedger {
@@ -430,8 +438,38 @@ export class EventLedger {
     await this.emit('SEARCH_QUERY', { query, resultCount });
   }
 
+  /** SEARCH V2 (§5.6): correlated query event — joins to SEARCH_CLICK. */
+  async searchQueriedV2(p: {
+    query: string;
+    normalized: string;
+    resultCount: number;
+    planKind: string;
+    probes: string[];
+    latencyMs: number;
+    corrections: Array<{ from: string; to: string }>;
+    correlationId: string;
+  }): Promise<void> {
+    await this.emit('SEARCH_QUERY', { ...p, v: 2 });
+  }
+
   async searchClicked(trackId: string, rankInResults: number): Promise<void> {
     await this.emit('SEARCH_CLICK', { rankInResults }, trackId);
+  }
+
+  /** SEARCH V2 (§5.6): correlated click — the learning join key. */
+  async searchClickedV2(p: {
+    trackId: string;
+    rankInResults: number;
+    query: string;
+    normalizedQuery: string;
+    correlationId: string;
+    lyricVerified?: boolean;
+  }): Promise<void> {
+    await this.emit(
+      'SEARCH_CLICK',
+      { v: 2, rankInResults: p.rankInResults, query: p.query, normalizedQuery: p.normalizedQuery, correlationId: p.correlationId, lyricVerified: p.lyricVerified ?? false },
+      p.trackId,
+    );
   }
 
   async aiPlaylistSaved(playlistId: string, promptHash: string): Promise<void> {

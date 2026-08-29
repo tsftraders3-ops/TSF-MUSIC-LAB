@@ -161,7 +161,38 @@ def run_device(pw, name, cfg):
         tab(page, "search")
         page.wait_for_timeout(900)
         shot(page, name, "10-search-browse")
-        page.get_by_placeholder("What do you want to listen to?").fill("mashooqa")
+
+        # 07b — SEARCH V2: typeahead rail (recents+suggestions+topquery)
+        field = page.get_by_placeholder("What do you want to listen to?")
+        field.fill("tum")
+        # count INSIDE the rail's visibility window (suggestions ~240ms,
+        # search replaces them at ~850ms) — before the shot's own settle
+        page.wait_for_timeout(420)
+        rail_rows = page.locator('[data-testid="search-suggest-row"]').count()
+        topq = page.locator('[data-testid="search-suggest-topquery"]').count()
+        log(name, "search-typeahead-rail", rail_rows >= 1, f"{rail_rows} suggest rows")
+        log(name, "search-typeahead-topquery", topq >= 1, f"best-guess rows: {topq}")
+        shot(page, name, "10b-search-typeahead")
+
+        # 07c — SEARCH V2: honest zero state (no unrelated rows)
+        field.fill("zzqqxx")
+        page.wait_for_timeout(2600)
+        shot(page, name, "10c-search-zero")
+        zero_text = page.get_by_text("No results", exact=False).count()
+        junk_rows = page.locator('[data-testid="search-top-result"]').count()
+        log(name, "search-honest-zero", zero_text >= 1 and junk_rows == 0, f"zero-state={zero_text} junk-top={junk_rows}")
+
+        # 07d — SEARCH V2: lyric fragment search (S1 flow, webmock lrclib)
+        field.fill("hum tere bin ab reh nahi sakte")
+        page.wait_for_timeout(3000)
+        shot(page, name, "10d-search-lyric")
+        lyric_rows = page.locator('[data-testid="track-row"]').count()
+        top_after = page.locator('[data-testid="search-top-result"]').count()
+        chip = page.locator('[data-testid="top-lyric-chip"]').count()
+        log(name, "search-lyric-flow", lyric_rows >= 1 or top_after >= 1, f"rows={lyric_rows} chip={chip}")
+
+        # 07 — classic: top result via the seeded fixture query
+        field.fill("mashooqa")
         page.wait_for_timeout(2200)
         shot(page, name, "11-search-results")
         top = page.locator('[data-testid="search-top-result"]').count()

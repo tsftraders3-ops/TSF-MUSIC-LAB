@@ -19,7 +19,11 @@ interface ITunesResult {
   trackTimeMillis?: number;
 }
 
-export async function searchItunes(query: string, limit = 20): Promise<Track[]> {
+export async function searchItunes(
+  query: string,
+  limit = 20,
+  _signal?: AbortSignal,
+): Promise<Track[]> {
   const qs = new URLSearchParams({
     term: query,
     media: 'music',

@@ -46,14 +46,138 @@ export const CHARTS: Collection[] = [
   { id: 'chart-5', title: 'Old Hindi Hits', subtitle: 'Spotify', artwork: art.old, kind: 'chart' },
 ];
 
-/** Search results: deterministic "match" on the first word. */
+/**
+ * SEARCH V2 fixture pool — the exact live-probe evidence the plan's
+ * gauntlet bars are built on (S1/S2/S5: dupes, cover, Bandhu, lyric
+ * snippet). WEB ONLY, merged only into search results.
+ */
+export const SEARCH_EXTRA: Track[] = [
+  {
+    id: 'saavn-thh1',
+    saavnId: 'thh1',
+    title: 'Tum Hi Ho',
+    artist: 'Mithoon, Arijit Singh',
+    artistsFull: ['Mithoon', 'Arijit Singh'],
+    album: 'Aashiqui 2',
+    artwork: art.emraan,
+    duration: 257,
+    source: 'saavn',
+    previewOnly: false,
+    encryptedUrl: 'mock://thh1',
+    year: 2013,
+    playCount: 371299372,
+    hasLyrics: true,
+    lyricsSnippet: 'Tere Bina Kya Wajood Mera',
+  },
+  {
+    id: 'saavn-thh2',
+    saavnId: 'thh2',
+    title: 'Tum Hi Ho (From "Aashiqui 2")',
+    artist: 'Mithoon, Arijit Singh',
+    artistsFull: ['Mithoon', 'Arijit Singh'],
+    album: 'Aashiqui 2 (Re-release)',
+    artwork: art.emraan,
+    duration: 257,
+    source: 'saavn',
+    previewOnly: false,
+    encryptedUrl: 'mock://thh2',
+    year: 2025,
+    playCount: 371300737,
+    hasLyrics: true,
+    lyricsSnippet: 'Tere Bina Kya Wajood Mera',
+  },
+  {
+    id: 'saavn-thh3',
+    saavnId: 'thh3',
+    title: 'Tum Hi Ho (From "Aashiqui 2")',
+    artist: 'Mithoon, Arijit Singh',
+    artistsFull: ['Mithoon', 'Arijit Singh'],
+    album: 'Aashiqui 2 (2026 Edition)',
+    artwork: art.emraan,
+    duration: 257,
+    source: 'saavn',
+    previewOnly: false,
+    encryptedUrl: 'mock://thh3',
+    year: 2026,
+    playCount: 371300737,
+    hasLyrics: true,
+    lyricsSnippet: 'Tere Bina Kya Wajood Mera',
+  },
+  {
+    id: 'saavn-thhc',
+    saavnId: 'thhc',
+    title: 'Tum Hi Ho - Cover',
+    artist: 'Shahid Mallya',
+    artistsFull: ['Shahid Mallya'],
+    album: 'Covers, Vol. 4',
+    artwork: art.old,
+    duration: 244,
+    source: 'saavn',
+    previewOnly: false,
+    encryptedUrl: 'mock://thhc',
+    year: 2019,
+    playCount: 1204533,
+  },
+  {
+    id: 'saavn-thhb',
+    saavnId: 'thhb',
+    title: 'Tum Hi Ho Bandhu',
+    artist: 'Pritam, Shreya Ghoshal',
+    artistsFull: ['Pritam', 'Shreya Ghoshal'],
+    album: 'F.A.L.T.U',
+    artwork: art.cocktail2,
+    duration: 271,
+    source: 'saavn',
+    previewOnly: false,
+    encryptedUrl: 'mock://thhb',
+    year: 2011,
+    playCount: 58201994,
+  },
+  {
+    id: 'saavn-arl1',
+    saavnId: 'arl1',
+    title: 'Apna Bana Le',
+    artist: 'Arijit Singh, Sachin-Jigar',
+    artistsFull: ['Arijit Singh', 'Sachin-Jigar'],
+    album: 'Bhediya',
+    artwork: art.mashooqa,
+    duration: 263,
+    source: 'saavn',
+    previewOnly: false,
+    encryptedUrl: 'mock://arl1',
+    year: 2022,
+    playCount: 480293154,
+    hasLyrics: true,
+    lyricsSnippet: 'Tere Bina Jiya Jaaye Na',
+  },
+];
+
+/** Search results: honest matching — a no-match returns [] (S6 fix);
+ *  only genuine title/artist/album hits return rows. */
 export function searchFixtures(query: string, limit: number): Track[] {
   const q = query.trim().toLowerCase();
-  const matched = TRACKS.filter(
+  const pool = [...TRACKS, ...SEARCH_EXTRA];
+  const matched = pool.filter(
     (t) =>
       t.title.toLowerCase().includes(q) ||
       t.artist.toLowerCase().includes(q) ||
-      (t.album ?? '').toLowerCase().includes(q),
+      (t.album ?? '').toLowerCase().includes(q) ||
+      (t.lyricsSnippet ?? '').toLowerCase().includes(q),
   );
-  return (matched.length ? matched : TRACKS).slice(0, limit);
+  // relaxation ladder / lyric windows may query fragments — token-match
+  // fallback keeps multi-word probes useful (matches ≥2 tokens)
+  if (matched.length === 0) {
+    const tokens = q.split(/\s+/).filter((t) => t.length >= 3);
+    if (tokens.length >= 2) {
+      return pool
+        .filter((t) => {
+          const hay = `${t.title} ${t.artist} ${t.album ?? ''} ${t.lyricsSnippet ?? ''}`.toLowerCase();
+          const hits = tokens.filter((tk) => hay.includes(tk)).length;
+          return hits >= Math.max(2, tokens.length - 1);
+        })
+        .slice(0, limit);
+    }
+  }
+  return matched.slice(0, limit);
 }
+

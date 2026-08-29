@@ -11,15 +11,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { PressableScale } from './PressableScale';
 import { colors, fonts, radius, spacing } from '../theme';
 
-const SEEN_KEY = 'tsf.whatsNew.v3_2_0';
+const SEEN_KEY = 'tsf.whatsNew.v3_3_0';
 /** Set on every close — Onboarding polls it before showing (see Onboarding.tsx). */
 const WHATSNEW_DISMISSED_KEY = 'tsf.whatsNewDismissed';
 
 const CHANGES = [
-  'Onboarding now shows REAL artist photos — Arijit, Diljit, AP Dhillon and 45+ more',
-  'Home got much deeper: Popular artists, New releases, Featured playlists and charts',
-  'Search got a Top result card and a bigger Browse grid',
-  'Sharp new app icon and splash — plus your setup is never asked twice',
+  'Search is now an ENGINE: typo-tolerant (Did you mean…), artist-aware ranking and duplicate releases collapsed',
+  'Search by LYRICS — type a line you remember; matches carry a green Lyric-match chip',
+  'Suggestions as you type — songs, artists and a Best guess from the catalog',
+  'Honest empty results (no more random songs) + searches learn from what you pick',
 ];
 
 export function WhatsNewDialog() {
@@ -58,7 +58,7 @@ export function WhatsNewDialog() {
             <Ionicons name="sparkles" size={20} color={colors.textOnGreen} />
           </View>
           <Text style={styles.title}>What&apos;s new</Text>
-          <Text style={styles.version}>TSF Music 3.2.0 · Fresh Look</Text>
+          <Text style={styles.version}>TSF Music 3.3.0 · Search V2</Text>
           <View style={styles.list}>
             {CHANGES.map((c) => (
               <View key={c} style={styles.row}>

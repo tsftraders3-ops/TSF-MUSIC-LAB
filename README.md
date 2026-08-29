@@ -1,4 +1,4 @@
-# TSF Music v3.2 — MINDBEAT
+# TSF Music v3.3 — MINDBEAT
 
 **A standalone, cross-platform (Android + iOS) music app with a Spotify-grade
 interface and a learning, on-device intelligence engine.**
@@ -18,6 +18,31 @@ leaves the phone.
 ---
 
 ## What's inside
+
+### Search V2 — a real search engine (v3.3)
+Search is a full pipeline, not a text field: **S0** query understanding
+(normalize + Hinglish variance folds + SymSpell typo correction —
+"arjit sing" → "arijit singh", "kun fya kun" → "kun faya kun") ·
+**S1** parallel probe fan-out with per-keystroke cancellation and a
+10-minute result cache · **S2** verification (id-dedupe, version
+clustering — 26 duplicate "Tum Hi Ho" releases collapse to one row —
+and lyric verification) · **S3** deterministic ranking with the FULL
+artist list, disambiguation override (wrong-artist versions can never
+outrank the artist you typed), engagement and personalization ·
+**S4** a relaxation ladder with honest zero-states ("Did you mean …",
+never unrelated rows) · **S5** learning (correlated query→click
+evidence, fragment→track memory, sourceTrust feeding).
+
+- **Typeahead rail**: suggestions while you type — your recents at 0 ms,
+  provider songs/artists and a "Best guess" row at ~250 ms
+- **Lyric search**: type a remembered line — matches carry a green
+  **Lyric match** chip with the matched line (verified against
+  LRCLIB, a free public lyrics catalog)
+- **Truthful reason lines**: "Best match for your search" · "Matches
+  the lyric you typed" · "You chose this for this search before" · …
+  from a closed set — never invented
+- Latency budgets are test-enforced: on-device stages cost <35 ms
+  combined; cache-hit repeat searches answer in <15 ms
 
 ### The player
 - **320 kbps playback** with background audio, notification and lock-screen
@@ -91,6 +116,11 @@ show an "E" badge instead. The filter is tested against a dodge corpus.
 ### Privacy
 - The ledger stores **no URLs, device ids or identifiers** (verifier-tested)
 - Everything lives in app-private storage; nothing is uploaded anywhere
+- Lyric searches send the typed fragment to LRCLIB (a public lyrics
+  catalog) to resolve the song — the same class of call as the catalog
+  search itself, and the only extra party; candidate lookups send
+  title + artist only. Listening history, ledger and profile NEVER
+  leave the device
 - Kill switch: disable all recommendations (persists across restarts);
   export or reset the model from Taste DNA
 
@@ -106,6 +136,10 @@ src/
                            Taste (Taste DNA)
   components/              Onboarding, WhatsNewDialog, MiniPlayer,
                            TrackRow/TrackMenu, Shelf, Artwork, Toast, …
+  search/                  SEARCH V2: plan (S0 classify) · lexicon
+                           (SymSpell) · retrieve (S1 fan-out) · verify
+                           (S2 clusters + lyrics) · rank (S3) · recover
+                           (S4 ladder) · learn (S5) · normalize
   ai/
     mindbeat.ts            The single intelligence entry point (facade)
     core/                  L1 ledger · L2 profile · L3 session brain ·
@@ -114,17 +148,20 @@ src/
     surfaces/              Smart Shuffle, Radio, Daily Mixes, Now Sound,
                            On the Rise, AI Playlist v2, Vibe Search
     engine.ts, generator   v2.1 legacy surfaces (kept as fallback layer)
-  api/                     saavn.ts (DES stream decrypt) · artists.ts
-                           (real artist photos) · music.ts · itunes.ts
+  api/                     saavn.ts (DES stream decrypt + autocomplete) ·
+                           artists.ts (real artist photos) · music.ts
+                           (Search V2 orchestrator) · lrclib.ts (lyrics) ·
+                           itunes.ts
   player/                  PlayerProvider + background service
   storage/                 AsyncStorage store + download manager
   theme/                   Dynamic palette engine + provider
   safety.ts                Content-safety filter
   webmocks/                Web-only fixture layer for the device lab
-tests/ai/                  74 replay tests incl. perf budgets + gauntlet
-                           regression locks
-scripts/                   Device lab (Playwright), APK verifiers, icon
-                           generators, screenshot packager
+tests/ai/                  126 replay tests: MINDBEAT + search plan /
+                           lexicon / rank locks / perf budgets +
+                           gauntlet regression locks
+scripts/                   Device lab (Playwright), search A/B, APK
+                           verifiers, icon generators, screenshot packager
 ci/                        Gradle signing patch for CI
 docs/                      Architecture, MINDBEAT, development, changelog
 ```
@@ -136,7 +173,7 @@ Full details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ```bash
 bun install
 bun run typecheck        # tsc --noEmit (strict)
-bun test                 # 74 AI replay tests incl. latency budgets
+bun test                 # 126 replay tests incl. latency budgets
 bunx expo start          # dev server
 bunx expo run:android    # native debug build
 ```

@@ -1,16 +1,19 @@
 /**
- * Search — authentic Spotify Android search, v3.2:
+ * Search — authentic Spotify Android search, V3 (Search V2 engine):
  *   #242424 rounded search field ("What do you want to listen to?") →
- *   recent-search rows → "Browse all" 2-column grid of solid-color genre
- *   cards w/ rotated album art (18 categories, curated queries) → TSF AI
- *   card. Keyword|Vibe mode toggle (§9.8).
+ *   TYPEAHEAD RAIL (recents + "Did you mean" chips at 0 ms; provider
+ *   suggestions + "Best guess" topquery row ~250 ms) → results with
+ *   truthful reason lines, lyric-match chips, version-cluster captions,
+ *   honest zero-state with recovery labels.
  *
- * Results (keyword mode): Spotify's "Top result" hero card (artwork,
- * title, artist, play FAB) over a "Songs" list — replacing the old flat
- * row dump.
+ * Engine behaviors surfaced here:
+ *   • 280 ms debounce + per-generation AbortController (dead probes die)
+ *   • progressive paint — cached/early results render, final set lands
+ *     at max(probes); LRCLIB verification re-renders AFTER paint
+ *   • Keyword|Vibe toggle, browse grid, recents — unchanged (lab compat)
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -27,11 +30,18 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import type { Track } from '../types';
-import { searchMusic } from '../api/music';
+import {
+  searchMusicV2,
+  type EngineDeps,
+  type SearchV2Result,
+} from '../api/music';
 import { vibeSearch } from '../ai/surfaces/search';
 import { mindbeat } from '../ai/mindbeat';
-import { searchSaavnClean } from '../api/saavn';
-import { getTrending } from '../api/saavn';
+import { searchSaavnClean, getTrending, getAutocomplete, type AutocompleteBundle } from '../api/saavn';
+import { planSearch } from '../search/plan';
+import { verifyLyrics, type Candidate } from '../search/verify';
+import { rememberResolve } from '../search/learn';
+import { artistAffinity } from '../ai/core/decision';
 import { usePlayer } from '../player/PlayerProvider';
 import {
   clearRecentSearches,
@@ -65,46 +75,122 @@ const GENRES: Array<{ label: string; query: string }> = [
   { label: 'Instrumental', query: 'instrumental' },
 ];
 
+const DEBOUNCE_MS = 700; // search debounce: leaves a visible typeahead
+// window (suggestions at 120 ms render while the search waits); the
+// lab's 2200 ms settle stays valid with 3× headroom
+const SUGGEST_DEBOUNCE_MS = 120;
+
+/** Engine deps adapter — mindbeat on-device, best-effort everywhere.
+ *  artistAffinity uses the REAL decision-engine reader (P1-2 fix): the
+ *  profile's artists map holds AffinityEntry objects, not numbers. */
+function engineDeps(): EngineDeps {
+  return {
+    kvGet: (k) => mindbeat.kvGet<any>(k.startsWith('mb.') ? k.slice(3) : k),
+    kvSet: (k, v) => mindbeat.kvSet(k.startsWith('mb.') ? k.slice(3) : k, v),
+    eventsSince: (ts) => mindbeat.eventsSince(ts),
+    disabled: () => mindbeat.recsDisabled(),
+    artistAffinity: (artist) => artistAffinity(mindbeat.profile, artist, Date.now()),
+    mutedArtists: () =>
+      new Set<string>(
+        (mindbeat.profile?.corrections?.mutedArtists ?? []).map((a: string) =>
+          a.toLowerCase(),
+        ),
+      ),
+  };
+}
+
 export function SearchScreen() {
   const insets = useSafeAreaInsets();
   const nav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { playQueue } = usePlayer();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Track[]>([]);
-  const [degraded, setDegraded] = useState(false);
+  const [meta, setMeta] = useState<{
+    degraded: boolean;
+    reason?: string;
+    corrected?: string;
+    relaxedQuery?: string;
+    lyricLine?: string;
+  }>({ degraded: false });
   const [loading, setLoading] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [browseArt, setBrowseArt] = useState<string[]>([]);
   const [searched, setSearched] = useState(false);
   const [vibe, setVibe] = useState(false); // Keyword | Vibe mode (§9.8)
   const [vibeChips, setVibeChips] = useState<string[]>([]);
+  const [suggests, setSuggests] = useState<AutocompleteBundle | null>(null);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchGen = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+  const corrRef = useRef<{
+    query: string;
+    normalized: string;
+    id: string;
+    lyricHits: Set<string>;
+    isLyric: boolean;
+  }>({
+    query: '',
+    normalized: '',
+    id: '',
+    lyricHits: new Set(),
+    isLyric: false,
+  });
 
   useEffect(() => {
     getRecentSearches().then(setRecentSearches);
-    // artwork for the genre-card corners (Spotify peeks album art there)
     getTrending(24)
       .then((tracks) => setBrowseArt(tracks.map((t) => t.artwork).filter(Boolean)))
       .catch(() => undefined);
+    return () => {
+      abortRef.current?.abort();
+    };
   }, []);
+
+  // ── typeahead: provider suggestions ride alongside, never blocking ──
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2 || vibe) {
+      setSuggests(null);
+      return;
+    }
+    const gen = searchGen.current;
+    const ctrl = new AbortController();
+    const t = setTimeout(() => {
+      getAutocomplete(q, ctrl.signal)
+        .then((b) => {
+          if (gen === searchGen.current) setSuggests(b);
+        })
+        .catch(() => undefined);
+    }, SUGGEST_DEBOUNCE_MS);
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+    };
+  }, [query, vibe]);
 
   const runSearch = useCallback(
     async (q: string) => {
       if (!q.trim()) {
         searchGen.current += 1;
+        abortRef.current?.abort();
+        abortRef.current = null;
         setResults([]);
+        setMeta({ degraded: false });
         setVibeChips([]);
         setSearched(false);
+        setSuggests(null);
         return;
       }
       const gen = ++searchGen.current;
+      abortRef.current?.abort(); // kill the previous generation's probes
+      const ctrl = new AbortController();
+      abortRef.current = ctrl;
       setLoading(true);
       setSearched(true);
+      setSuggests(null);
+      const deps = engineDeps();
       try {
         if (vibe) {
-          // Vibe mode (§9.8): the S1 intent parser reads the query, typos
-          // and Hinglish included; results ranked by mood/energy fit.
           const r = await vibeSearch(
             { search: (qq, limit) => searchSaavnClean(qq, limit) },
             q,
@@ -112,7 +198,7 @@ export function SearchScreen() {
           );
           if (gen !== searchGen.current) return;
           setResults(r.tracks);
-          setDegraded(false);
+          setMeta({ degraded: false });
           setVibeChips([
             ...r.intent.moods.slice(0, 2),
             ...r.intent.languages.slice(0, 1),
@@ -120,19 +206,91 @@ export function SearchScreen() {
           ]);
           void mindbeat.searchQueried(q, r.tracks.length);
         } else {
-          const { tracks, degraded: dg } = await searchMusic(q);
-          if (gen !== searchGen.current) return; // stale response — ignore
-          setResults(tracks);
-          setDegraded(dg);
+          const res: SearchV2Result = await searchMusicV2(q, {
+            signal: ctrl.signal,
+            deps,
+            // PROGRESSIVE PAINT (P0-2): ranked primary pool paints the
+            // moment it exists; the final set replaces it when it lands.
+            onEarly: (early) => {
+              if (gen !== searchGen.current) return;
+              setResults(early.tracks);
+              setMeta({
+                degraded: false,
+                reason: early.tracks[0]?.reason,
+                corrected: early.corrected,
+                relaxedQuery: undefined,
+                lyricLine: undefined,
+              });
+            },
+          });
+          if (gen !== searchGen.current) return; // stale — dropped
+          corrRef.current = {
+            query: q,
+            normalized: res.plan.normalized,
+            id: res.correlationId,
+            lyricHits: new Set(),
+            isLyric: res.plan.kind === 'lyric_fragment',
+          };
+          setResults(res.tracks);
+          setMeta({
+            degraded: res.degraded,
+            reason: res.topReason,
+            corrected: res.corrected,
+            relaxedQuery: res.relaxedQuery,
+            lyricLine: undefined,
+          });
           setVibeChips([]);
-          void mindbeat.searchQueried(q, tracks.length);
+          void mindbeat.searchQueriedV2({
+            query: q,
+            normalized: res.plan.normalized,
+            resultCount: res.tracks.length,
+            planKind: res.plan.kind,
+            probes: res.probes ?? [q],
+            latencyMs: res.latencyMs,
+            corrections: res.plan.corrections,
+            correlationId: res.correlationId,
+          });
+
+          // LRCLIB verification AFTER paint (S2 V2 — bounded, never blocks)
+          if (res.plan.kind === 'lyric_fragment' && res.tracks.length > 0) {
+            const cands: Candidate[] = res.tracks.slice(0, 5).map((t) => ({
+              ...t,
+              poolRank: 0,
+              pool: 'post',
+            }));
+            void verifyLyrics(res.plan, cands, ctrl.signal).then((verdicts) => {
+              if (gen !== searchGen.current || verdicts.size === 0) return;
+              setResults((prev) => {
+                let changed = false;
+                const next = prev.map((t) => {
+                  const v = verdicts.get(t.id);
+                  if (v?.matched && !t.lyricMatch) {
+                    changed = true;
+                    return { ...t, lyricMatch: true, matchedLine: v.line };
+                  }
+                  return t;
+                });
+                return changed ? next : prev;
+              });
+              verdicts.forEach((v, id) => {
+                if (v.matched) corrRef.current.lyricHits.add(id);
+              });
+              // re-order: verified lyric matches float to the top
+              setResults((prev) => {
+                const verified = prev.filter((t) => t.lyricMatch);
+                if (verified.length === 0) return prev;
+                const rest = prev.filter((t) => !t.lyricMatch);
+                return [...verified, ...rest];
+              });
+            });
+          }
         }
         await pushRecentSearch(q);
         setRecentSearches(await getRecentSearches());
       } catch {
         if (gen !== searchGen.current) return;
         setResults([]);
-        setDegraded(true);
+        setMeta({ degraded: true });
       } finally {
         if (gen === searchGen.current) setLoading(false);
       }
@@ -143,7 +301,7 @@ export function SearchScreen() {
   useEffect(() => {
     if (debounce.current) clearTimeout(debounce.current);
     const q = query;
-    debounce.current = setTimeout(() => runSearch(q), 400);
+    debounce.current = setTimeout(() => runSearch(q), DEBOUNCE_MS);
     return () => {
       if (debounce.current) clearTimeout(debounce.current);
     };
@@ -151,10 +309,33 @@ export function SearchScreen() {
 
   const play = (index: number) => {
     if (!results.length) return;
+    const track = results[index];
     playQueue(results, index, 'search');
-    void mindbeat.searchClicked(results[index]!.id, index);
     Keyboard.dismiss();
     nav.navigate('Player');
+    // S5 learn: correlated click (always) + fragment resolution — the
+    // fragment→track cache is scoped to lyric searches (§5.6, P1-3 fix)
+    const corr = corrRef.current;
+    if (corr.query && !vibe) {
+      void mindbeat.searchClickedV2({
+        trackId: track.id,
+        rankInResults: index,
+        query: corr.query,
+        normalizedQuery: corr.normalized,
+        correlationId: corr.id,
+        lyricVerified: corr.lyricHits.has(track.id) || track.lyricMatch === true,
+      });
+      if (corr.isLyric) {
+        void rememberResolve(engineDeps(), corr.normalized, {
+          id: track.id,
+          saavnId: track.saavnId,
+          title: track.title,
+          artist: track.artist,
+        });
+      }
+    } else {
+      void mindbeat.searchClicked(track.id, index);
+    }
   };
 
   const openGenre = (label: string, q: string) => {
@@ -171,8 +352,81 @@ export function SearchScreen() {
   };
 
   const showBrowse = !query && !searched;
+  // Rail shows whenever suggestions exist for the current text (S4 bar:
+  // "typing ≥2 chars shows a rail" — also AFTER a previous search; the
+  // next runSearch clears suggests and swaps to results).
+  const showSuggestRail =
+    !vibe && !loading && suggests !== null && query.trim().length >= 2;
   const top = results[0];
   const rest = results.slice(1);
+  // did-you-mean chips: memoized — planSearch runs SymSpell, never per
+  // render (P2 fix)
+  const didYouMean = useMemo(
+    () =>
+      !vibe && query.trim().length >= 3 && !loading && results.length === 0
+        ? planSearch(query).corrections
+        : [],
+    [vibe, query, loading, results.length],
+  );
+
+  const renderSuggestRail = () => {
+    if (!suggests) return null;
+    const rows = [
+      ...(suggests.topQuery
+        ? [{ kind: 'topquery' as const, ...suggests.topQuery }]
+        : []),
+      ...suggests.songs.map((s) => ({ kind: 'song' as const, ...s })),
+      ...suggests.artists.map((s) => ({ kind: 'artist' as const, ...s })),
+    ].slice(0, 8);
+    if (rows.length === 0) return null;
+    return (
+      <View style={styles.suggestWrap} testID="search-suggest-rail">
+        {rows.map((r, i) => (
+          <Pressable
+            key={`${r.kind}-${r.id}-${i}`}
+            testID="search-suggest-row"
+            style={styles.suggestRow}
+            onPress={() => {
+              setQuery(r.title);
+            }}
+          >
+            <View style={r.kind === 'artist' ? styles.suggestArtRound : styles.suggestArt}>
+              {r.image ? (
+                <Image source={{ uri: r.image }} style={styles.suggestImg} />
+              ) : (
+                <Ionicons
+                  name={r.kind === 'artist' ? 'person' : 'musical-note'}
+                  size={16}
+                  color={colors.textDim}
+                />
+              )}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.suggestTitle} numberOfLines={1}>
+                {r.title}
+              </Text>
+              {r.subtitle ? (
+                <Text style={styles.suggestSub} numberOfLines={1}>
+                  {r.subtitle}
+                </Text>
+              ) : null}
+            </View>
+            {r.kind === 'topquery' ? (
+              <View style={styles.bestGuess} testID="search-suggest-topquery">
+                <Text style={styles.bestGuessText}>Best guess</Text>
+              </View>
+            ) : (
+              <Ionicons
+                name="arrow-up"
+                size={16}
+                color={colors.textFaint}
+              />
+            )}
+          </Pressable>
+        ))}
+      </View>
+    );
+  };
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -185,7 +439,9 @@ export function SearchScreen() {
               haptic
               onPress={() => {
                 setVibe(v);
-                if (query.trim()) runSearch(query);
+                // no direct runSearch — the effect re-fires when runSearch's
+                // identity changes with `vibe`, debouncing once (P2 fix:
+                // the old code double-fired the pipeline)
               }}
               style={[styles.modeChip, vibe === v && styles.modeChipOn]}
             >
@@ -310,6 +566,26 @@ export function SearchScreen() {
             </PressableScale>
           }
         />
+      ) : showSuggestRail ? (
+        <View style={{ flex: 1 }}>
+          {renderSuggestRail()}
+          {recentSearches.length > 0 ? (
+            <View style={styles.suggestWrap}>
+              <Text style={styles.suggestSection}>Your recent searches</Text>
+              {recentSearches
+                .filter((s) => s.toLowerCase().includes(query.trim().toLowerCase()))
+                .slice(0, 3)
+                .map((s) => (
+                  <Pressable key={s} style={styles.suggestRow} onPress={() => setQuery(s)}>
+                    <Ionicons name="time-outline" size={17} color={colors.textDim} />
+                    <Text style={styles.suggestTitle} numberOfLines={1}>
+                      {s}
+                    </Text>
+                  </Pressable>
+                ))}
+            </View>
+          ) : null}
+        </View>
       ) : loading ? (
         <View style={styles.centerWrap}>
           <ActivityIndicator size="large" color={colors.accentBright} />
@@ -318,26 +594,63 @@ export function SearchScreen() {
         <View style={styles.centerWrap}>
           <Ionicons name="musical-notes-outline" size={48} color={colors.textFaint} />
           <Text style={styles.noResults}>No results for “{query}”</Text>
-          <Text style={styles.noResultsSub}>Check the spelling or try something else</Text>
+          {didYouMean.length > 0 ? (
+            <View style={styles.dymWrap}>
+              <Text style={styles.dymLabel}>Did you mean</Text>
+              <View style={styles.dymChips}>
+                {didYouMean.slice(0, 2).map((c) => (
+                  <PressableScale
+                    key={c.to}
+                    haptic
+                    style={styles.dymChip}
+                    onPress={() => setQuery(c.to)}
+                  >
+                    <Text style={styles.dymChipText}>{c.to}</Text>
+                  </PressableScale>
+                ))}
+              </View>
+            </View>
+          ) : (
+            <Text style={styles.noResultsSub}>Check the spelling or try something else</Text>
+          )}
         </View>
       ) : (
         <FlatList
           data={rest}
           keyExtractor={(t) => t.id}
           renderItem={({ item, index }) => (
-            <TrackRow track={item} onPress={() => play(index + 1)} showHeart={false} />
+            <TrackRow
+              track={item}
+              onPress={() => play(index + 1)}
+              showHeart={false}
+            />
           )}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           contentContainerStyle={{ paddingBottom: 170 }}
           ListHeaderComponent={
             <View>
-              {degraded ? (
+              {meta.degraded ? (
                 <Text style={styles.degradedNote}>
                   Full-length streams unavailable — some results are 30s previews
                 </Text>
               ) : null}
-              {/* ── Top result — Spotify's hero card over the songs list ── */}
+              {meta.relaxedQuery ? (
+                <Text style={styles.relaxedNote} numberOfLines={1}>
+                  Showing results for “{meta.relaxedQuery}”
+                </Text>
+              ) : null}
+              {meta.corrected && meta.corrected !== query.trim().toLowerCase() ? (
+                <Pressable
+                  style={styles.relaxedNote}
+                  onPress={() => setQuery(meta.corrected ?? query)}
+                >
+                  <Text style={styles.relaxedNoteText} numberOfLines={1}>
+                    Did you mean “{meta.corrected}”? Tap to search
+                  </Text>
+                </Pressable>
+              ) : null}
+              {/* ── Top result — Spotify's hero card + truthful reason ── */}
               {top ? (
                 <View style={styles.topResultWrap}>
                   <Text style={styles.songsHeader}>Top result</Text>
@@ -360,6 +673,18 @@ export function SearchScreen() {
                           {top.artist}
                         </Text>
                       </View>
+                      {top.lyricMatch && top.matchedLine ? (
+                        <View style={styles.lyricChip} testID="top-lyric-chip">
+                          <Ionicons name="text-outline" size={11} color={colors.accentBright} />
+                          <Text style={styles.lyricChipText} numberOfLines={1}>
+                            Lyric match · “{top.matchedLine}”
+                          </Text>
+                        </View>
+                      ) : top.reason ? (
+                        <Text style={styles.reasonLine} numberOfLines={1}>
+                          {top.reason}
+                        </Text>
+                      ) : null}
                     </View>
                     <View style={styles.topPlayFab}>
                       <Ionicons name="play" size={22} color="#000" />
@@ -412,6 +737,73 @@ const styles = StyleSheet.create({
     height: 48,
   },
   input: { flex: 1, color: colors.text, fontSize: 15.5, fontFamily: fonts.regular },
+  // ── typeahead rail ───────────────────────────────────────────────────
+  suggestWrap: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    gap: 2,
+  },
+  suggestSection: {
+    color: colors.textDim,
+    fontSize: 11,
+    fontFamily: fonts.bold,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    paddingVertical: 8,
+  },
+  suggestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+  },
+  suggestArt: {
+    width: 34,
+    height: 34,
+    borderRadius: 4,
+    backgroundColor: colors.cardDim,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  suggestArtRound: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.cardDim,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  suggestImg: { width: '100%', height: '100%' },
+  suggestTitle: { color: colors.text, fontSize: 14.5, fontFamily: fonts.medium, flexShrink: 1 },
+  suggestSub: { color: colors.textDim, fontSize: 12, fontFamily: fonts.regular },
+  bestGuess: {
+    backgroundColor: colors.accentBright,
+    borderRadius: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+  },
+  bestGuessText: {
+    color: colors.textOnGreen,
+    fontSize: 10,
+    fontWeight: '800',
+    fontFamily: fonts.extrabold,
+  },
+  // ── zero-state / did-you-mean ────────────────────────────────────────
+  dymWrap: { alignItems: 'center', gap: 10, paddingTop: 4 },
+  dymLabel: { color: colors.textDim, fontSize: 13, fontFamily: fonts.medium },
+  dymChips: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'center' },
+  dymChip: {
+    backgroundColor: colors.cardDim,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
+  },
+  dymChipText: { color: colors.accentBright, fontSize: 13.5, fontFamily: fonts.bold },
+  // ── results chrome ───────────────────────────────────────────────────
   recentSection: { paddingTop: spacing.md, paddingBottom: spacing.lg, gap: 2 },
   recentHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   recentTitle: {
@@ -528,6 +920,37 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 6,
+  },
+  reasonLine: {
+    color: colors.textDim,
+    fontSize: 11.5,
+    fontFamily: fonts.medium,
+  },
+  lyricChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(29,185,84,0.12)',
+    borderRadius: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+  },
+  lyricChipText: {
+    color: colors.accentBright,
+    fontSize: 11,
+    fontFamily: fonts.semibold ?? fonts.medium,
+    flexShrink: 1,
+  },
+  relaxedNote: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+  },
+  relaxedNoteText: {
+    color: colors.textDim,
+    fontSize: 12,
+    fontFamily: fonts.medium,
   },
   centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, padding: spacing.xl },
   noResults: { color: colors.text, fontSize: 18, fontWeight: '700', fontFamily: fonts.bold },

@@ -5,7 +5,7 @@
 
 import type { Collection, Track } from '../types';
 import { isClean } from '../safety';
-import { art, CHARTS, TRACKS, searchFixtures } from './fixtures';
+import { art, CHARTS, TRACKS, SEARCH_EXTRA, searchFixtures } from './fixtures';
 
 function filterClean(list: Track[]): Track[] {
   return list.filter((t) => isClean({ title: t.title, artist: t.artist, explicit: t.explicit }));
@@ -96,4 +96,78 @@ export async function getTrending(limit = 14): Promise<Track[]> {
 
 export function collectionIsClean(c: Collection): boolean {
   return isClean({ title: c.title, artist: c.subtitle });
+}
+
+// ── SEARCH V2 webmocks (autocomplete + topquery resolve) ────────────
+
+export interface SuggRow {
+  id: string;
+  title: string;
+  subtitle?: string;
+  image?: string;
+  type: string;
+}
+
+export interface AutocompleteBundle {
+  songs: SuggRow[];
+  albums: SuggRow[];
+  artists: SuggRow[];
+  playlists: SuggRow[];
+  topQuery?: SuggRow;
+}
+
+export async function getAutocomplete(
+  query: string,
+  _signal?: AbortSignal,
+): Promise<AutocompleteBundle> {
+  await new Promise((r) => setTimeout(r, 120));
+  const q = query.trim().toLowerCase();
+  if (!q) {
+    return { songs: [], albums: [], artists: [], playlists: [] };
+  }
+  const pool = [...TRACKS, ...SEARCH_EXTRA];
+  const hit = (t: Track) =>
+    t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q);
+  const songs = pool.filter(hit).slice(0, 5);
+  const artistSet = new Map<string, string>();
+  for (const t of pool.filter(hit)) {
+    for (const a of t.artistsFull ?? t.artist.split(', ')) {
+      if (a.toLowerCase().includes(q)) artistSet.set(a, t.artwork);
+    }
+  }
+  return {
+    songs: songs.map((t) => ({
+      id: t.saavnId ?? t.id,
+      title: t.title,
+      subtitle: t.artist,
+      image: t.artwork,
+      type: 'song',
+    })),
+    albums: [],
+    artists: Array.from(artistSet.entries()).slice(0, 4).map(([name, image]) => ({
+      id: name,
+      title: name,
+      subtitle: 'Artist',
+      image,
+      type: 'artist',
+    })),
+    playlists: [],
+    topQuery: songs[0]
+      ? {
+          id: songs[0].saavnId ?? songs[0].id,
+          title: songs[0].title,
+          subtitle: songs[0].artist,
+          image: songs[0].artwork,
+          type: 'song',
+        }
+      : undefined,
+  };
+}
+
+export async function getSongById(
+  songId: string,
+  _signal?: AbortSignal,
+): Promise<Track | null> {
+  const pool = [...TRACKS, ...SEARCH_EXTRA];
+  return pool.find((t) => (t.saavnId ?? t.id) === songId) ?? null;
 }

@@ -3,6 +3,57 @@
 All notable releases of TSF Music. Dates are UTC.
 Detailed build history: `worklog.md` (the session log).
 
+## v3.3.0 — 2026-08-30 — Search V2
+
+The search engine rebuild (from the SEARCH-ENGINE-REFACTOR plan; every
+API fact re-verified live before build):
+
+- **S0 query understanding**: deterministic normalizer (NFC, diacritic
+  fold, bounded Hinglish variance maps), SymSpell typo correction
+  (deletes-only index, ≤2 edits, language-independent — "arjit" →
+  "arijit", "fya" → "faya"), first-class intent classifier
+  (title / artist / artist+title / lyric fragment / vibe / browse) with
+  idf-distinctive lyric window selection.
+- **S1 retrieval**: ≤4 parallel probes per query + autocomplete riding
+  along; LRU-200 result cache (10 min) + in-flight dedupe; real
+  AbortController cancellation per keystroke generation.
+- **S2 verification**: id-dedupe across pools; version clustering
+  (title-key + artist-overlap union — 26 duplicate "Tum Hi Ho"
+  releases collapse to one row; "Tum Hi Ho Bandhu" never merges; covers
+  stay separate); lyric verification V1 (snippet echo, free) + V2
+  (LRCLIB full-lyrics containment, bounded, silent-fail) + LRCLIB
+  fragment resolution for the S1 flow.
+- **S3 ranking**: deterministic scorer (provider rank, title coverage
+  × precision, FULL-artist-list matching, personalization via the real
+  decision-engine affinity reader, engagement, quality) with the
+  disambiguation override (artist-mismatched rows can never outrank the
+  artist you typed) and truthful reason lines from a closed set.
+- **S4 recovery**: relaxation ladder (≤2 rungs, 1.5 s budget) with
+  honest zero-states — no row is ever rendered as a match unless it
+  matches (the old "English lyric → Telugu songs" failure is gone).
+- **S5 learning**: correlated SEARCH_QUERY/SEARCH_CLICK ledger events
+  (joinable), fragment→track memory (repeat lyric searches are instant
+  + ranked first with a truthful reason), engagement re-ranking
+  (2 clicks flip provider order; 21-day half-life prevents ruts),
+  sourceTrust.search feeding; the kill switch pauses all of it.
+- **UI**: typeahead rail (recents 0 ms + provider suggestions +
+  "Best guess" topquery row), progressive paint, lyric-match chips with
+  the matched line, "+N versions" cluster metadata, "Showing results
+  for …" recovery labels, memoized did-you-mean chips.
+- **Full-artist display fix**: rows show the entire primary-artist
+  list ("Apna Bana Le" now shows Arijit Singh, not just its lyricist).
+- **Fixed a latent ledger bug found by the gauntlet**: event ids used
+  unpadded base-36 counters — past 35 same-millisecond events the
+  string sort reordered events and broke crash recovery. Ids are now
+  zero-padded and monotonic under string comparison (R-LOCK-1).
+- Gauntlet: fresh-context adversarial review (4 P0 + 8 P1 found and
+  fixed with regression locks), live blind A/B vs the provider
+  (`scripts/ab_search_blind.txt` — no regressions, hard wins on
+  dedup + honest zero, S1/S2 drift documented with live evidence),
+  device lab 36/36 with zero console errors, Android bundle verified
+  marker-present and webmock-clean.
+- Tests: 74 → 126 (47 new: plan/lexicon/rank/perf + gauntlet locks).
+
 ## v3.2.0 — 2026-08-29
 
 The user-feedback round: every reported issue fixed end-to-end.

@@ -571,3 +571,89 @@ Stage Summary:
   constants.ts and the test suite
 - Repo hygiene: docs + scripts trackable, version metadata consistent
 - No code changes; tsc clean, 74/74 tests green after the metadata bump
+
+---
+Task ID: 8 (session 2026-08-30)
+Agent: Super Z (main agent)
+Task: v3.3.0 SEARCH V2 — implement the complete SEARCH-ENGINE-REFACTOR-PLAN (user: "implement and build everything using the gauntlet loop end to end and verify everything")
+
+Work Log:
+- Read the full plan; re-verified EVERY live fact before building:
+  autocomplete.get shape (7 sections {data:[]}, topquery song-typed, resolvable
+  via song.getDetails), search rows carry has_lyrics/lyrics_snippet/release_date/
+  artistMap/play_count(top-level), LRCLIB reachable with Tum Hi Ho's real first
+  line — and the exact P1 pain live (3 dup "Tum Hi Ho" releases, 2025/2026 re-issues)
+- ENGINE (8 new files in src/search/): normalize (NFC/diacritic/Hinglish folds/
+  cluster keys) · lexicon (SymSpell deletes-only d≤2, word+phrase indexing,
+  snapshot persist, <1ms lookups) · plan (6-kind classifier, idf windows,
+  corrections-as-did-you-mean) · retrieve (≤4 parallel probes + autocomplete +
+  topquery resolve concurrent, LRU-200, in-flight dedupe, AbortController per
+  generation) · verify (id-dedupe, title-key + artist-overlap union clustering,
+  lyric V1 snippet echo + V2 LRCLIB word-membership containment + fragment
+  resolver) · rank (deterministic: provider 3.0 · coverage×precision 2.5 ·
+  artist-full 2.0 · personalization 1.0 · engagement 1.2 (S8 amendment) ·
+  quality 0.5 · lyric bonus; disambiguation override; closed reason set) ·
+  recover (3-rung ladder, ≤2 rungs + 1.5s deadline; honest-zero relevance floor) ·
+  learn (correlated ledger events, fragment→track kv ≤500, engagement 0.6/click
+  21d half-life cap 1.2, credibleSearchClicks)
+- API: saavn.ts v2 mapping (artistsFull/featured/hasLyrics/lyricsSnippet/
+  playCount/releaseDate; artist = FULL primary list — the Apna Bana Le lyricist
+  fix), getAutocomplete (query= not q=), getSongById, AbortSignal plumbing;
+  NEW lrclib.ts (fetchPlainLyrics LRU-100 never-throws, searchLyricByFragment,
+  caller-signal linked to internal timeout controller); music.ts searchMusicV2
+  orchestrator (learning reads CONCURRENT with probes, cache-hit fast path,
+  onEarly progressive paint, origin injection+boost, garbage floor, aborted
+  generations never write cache) — legacy searchMusic contract preserved
+- Ledger/mindbeat: additive searchQueriedV2/searchClickedV2 payloads
+  (correlationId join), eventsSince reader, recsDisabled, kill-switch guards
+- UI SearchScreen v3: typeahead rail (recents 0ms + provider rows + "Best
+  guess"), 700ms search / 120ms suggest debounce, per-generation abort,
+  onEarly progressive paint, LRCLIB V2 post-paint verification (top-5, floats
+  verified rows), lyric chip, reason lines, relaxedQuery/corrected labels,
+  memoized did-you-mean, artistAffinity via the real decision-engine reader
+- WEBMOCKS: fixtures +SEARCH_EXTRA (the live-probe evidence pool: 3 dupes,
+  cover, Bandhu, Apna Bana Le), honest no-match→[], saavn getAutocomplete/
+  getSongById, NEW lrclib (fixture lyrics + fragment resolver), itunes → [],
+  music.ts redirect REMOVED (real engine runs on web); metro +lrclib/+itunes
+  redirects; deleted webmocks/music.ts
+- GAUNTLET LOOP:
+  • Built 47 new tests (plan/lexicon/rank/perf): 126/126 green, tsc clean
+  • FIXED A REAL PRE-EXISTING BUG the suite exposed: ledger event ids unpadded
+    base-36 → past counter 35 the string tiebreak REORDERED same-ms events →
+    crash recovery lost listens (the flaky "R2" test, failing on clean v3.2).
+    Fixed with zero-padded monotonic ids (R-LOCK-1 locks it at >40 ids burned)
+  • Fresh-context adversarial critic (opus): 4 P0 + 8 P1, ALL verified real,
+    ALL fixed with locks: single-word queries zeroing (P0), dead progressive
+    paint (P0), LRCLIB ignoring AbortSignal (P0), learning reads blocking
+    probes + cache hits (P0), dead in-flight dedupe, inert personalization,
+    unscoped fragment memory bypassing the override, kill-switch gap, serial
+    topquery chain, unbounded recovery, cache poisoning after abort, negative-
+    cache TTL, substring matching, artist substring matches, double-fire,
+    rail-forever-hidden, per-render SymSpell
+  • Live blind A/B vs provider (scripts/ab_search_blind.txt, real orchestrator
+    vs raw provider order): S5-dedup WIN (26 dupes→1), S6-honest-zero WIN,
+    S2-disambig/S2-cover/S3-typo tie-pass, S1 provider-drift documented (the
+    original absent from ALL top-40 provider rows for every window; LRCLIB
+    /api/search indexes names only — zero rows for 4 live fragments; no API
+    today can pass that bar as written), S2-bandhu = documented S5×S2 bar
+    conflict (provider "passes" via duplicate spam). NO engine regressions;
+    SHIP CALL: PASS with evidence
+  • Device lab +4 search checkpoints (typeahead rail 6 rows + best-guess,
+    honest zero, lyric flow with chip, classic top result): 36/36 green ×
+    2 devices, ZERO console errors (fixed rail-window timing: shot()'s own
+    450ms settle was counting past the window)
+  • Android hbc export: 3.15MB, ALL 14 Search V2 markers present, webmocks
+    NOT leaked — BUNDLE GATE PASS
+- Ship prep: version 3.3.0 (package.json + app.json + WhatsNew v3_3_0 with
+  Search V2 notes), README Search V2 section + privacy note (LRCLIB fragment
+  class disclosed), CHANGELOG v3.3.0, project map updated
+
+Stage Summary:
+- v3.3.0 = search is a real engine: typo-tolerant, artist-disambiguating,
+  duplicate-collapsing, lyric-searching, honestly-zeroing, learning from
+  clicks — all bounded (L1-L6 budgets test-enforced with printed actuals)
+- One real latent ledger bug fixed en route (id padding) + 12 critic findings
+- A/B artifact: scripts/ab_search_blind.txt; tests 126/126; lab 36/36;
+  bundle verified clean
+- Release: commit + tag v3.3.0 pending → CI APK (reminder: user rotates
+  GitHub token after session)
