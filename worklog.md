@@ -374,3 +374,20 @@ Stage Summary:
   Taste DNA/Daily Mixes show realistic variance; WebKit engine for closer
   iOS fidelity; queue-sheet modal edge is an RNW rendering artifact (native
   slide animation is correct).
+
+---
+Task ID: 4 (session 2026-08-29, part 3)
+Agent: Super Z (main agent)
+Task: User asked for UI screenshots in Pixel 7 + iPhone 13 profiles to confirm current look (v3.0.0).
+
+Work Log:
+- Ran scripts/lab.sh fresh: 32/32 steps ok, 0 console errors, 0 page errors, 21 screens × 2 devices
+- Found and FIXED a fidelity bug in the lab: pw.devices registry viewports subtract browser UI (Pixel 7 → 412×839, iPhone 13 → 390×664), but TSF Music is a native app (no browser chrome). Patched device_lab.py to full-screen hardware viewports (412×915 / 390×844). Shots now at exact native resolution: 1082×2402 (P7 @2.625x) and 1170×2532 (iP13 @3x)
+- Re-ran lab after patch: again 32/32 ok, 0 errors; verified all 42 PNGs non-blank + uniform sizes
+- Packaged for review (scripts/package_ui_shots.py): download/tsf-ui-screenshots/{pixel7,iphone13}/ (full-res), side-by-side/ (21 labeled P7|iP13 pairs), UI-Gallery.html (browsable, sticky TOC)
+- VLM spot-check of pairs (home, player, search): all render correctly on both profiles. Noted expected narrow-viewport differences on iPhone (2 carousel cards vs 3, card-title ellipsis, mini-player artist ellipsis) — responsive behavior, same as real Spotify
+
+Stage Summary:
+- Deliverable: download/tsf-ui-screenshots/ (21 screens × 2 devices + side-by-side pairs + HTML gallery)
+- Lab improvement persisted: device profiles now match native full-screen rendering (applies to all future lab runs)
+- Awaiting user confirmation on the current UI before further iteration
