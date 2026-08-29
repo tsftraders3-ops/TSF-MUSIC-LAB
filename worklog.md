@@ -496,3 +496,30 @@ Stage Summary:
   resume), Home scrolls Spotify-deep (editorial feed + artist rail), search gets Top result +
   18-category browse, brand-new gauntlet-verified icon/splash.
 - Release: tag v3.2.0 pending push → CI APK (reminder: user rotates GitHub token after session)
+
+---
+Task ID: 6 (final)
+Agent: Super Z (main agent)
+Task: v3.2.0 release verification
+
+Work Log:
+- Commit 3cebfd4 (+ c7cae20 lab tooling, was gitignored — root cause of the
+  lost lab) → tag v3.2.0 → pushed
+- CI: tag run 33246542183 SUCCESS + main run 33246542879 SUCCESS
+- Release live: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v3.2.0
+  (79.2 MB APK; same keystore → in-place upgrade over 3.1.0)
+- APK deep-verified (scripts/verify_v32_apk.py): manifest versionName 3.2.0
+  (UTF-16 probe); 2.05MB Hermes bundle with ALL 12 shipped markers (onboarding
+  prompts, Arijit photo seed, getArtistPageDetails, content.getHomepageData,
+  Popular artists / New releases / Featured playlists, tsf.onboardingDone +
+  tsf.onboardingProgress persistence keys, Top result, Made for);
+  webmocks NOT leaked
+
+Stage Summary:
+- FINAL SHIP: https://github.com/mua47105-hue/TSF-MUSIC/releases/tag/v3.2.0
+  (install this one). Fresh installs: What's new → name → REAL artist photos
+  (48 verified + unbounded More + search) → genres → deep Home; completing
+  onboarding is permanent (verified by automated reload regression).
+- User screenshots: download/tsf-ui-screenshots/ (19 states × 2 devices,
+  side-by-side pairs, UI-Gallery.html)
+- Reminder: user rotates GitHub token after session
