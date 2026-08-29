@@ -58,6 +58,7 @@ function TabsScreen() {
           sceneContainerStyle: { backgroundColor: colors.bg },
           tabBarActiveTintColor: colors.text,
           tabBarInactiveTintColor: colors.inactiveTab,
+          tabBarTestID: `tab-${route.name.toLowerCase()}`,
           tabBarStyle: {
             backgroundColor: colors.bgDeep, // Spotify: pure black bar
             borderTopWidth: 0,

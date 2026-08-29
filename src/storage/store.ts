@@ -6,7 +6,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { DailyMix, ListeningStats, PlayCountEntry, Playlist, Track } from '../types';
+import type { Collection, DailyMix, ListeningStats, PlayCountEntry, Playlist, Track } from '../types';
 
 const KEYS = {
   favorites: 'tsf.favorites.v1',
@@ -14,6 +14,7 @@ const KEYS = {
   searches: 'tsf.recentSearches.v1',
   downloads: 'tsf.downloads.v1',
   chartsCache: 'tsf.chartsCache.v1',
+  homeFeedCache: 'tsf.homeFeedCache.v1',
   playlists: 'tsf.playlists.v1',
   playCounts: 'tsf.playCounts.v1',
   dailyMixes: 'tsf.dailyMixes.v1',
@@ -269,6 +270,24 @@ export async function getChartsCache(allowStale = false) {
 
 export async function setChartsCache(shelves: ChartsCache['shelves']): Promise<void> {
   await writeJSON(KEYS.chartsCache, { at: Date.now(), shelves });
+}
+
+// ── Home editorial feed cache (6h TTL — same freshness class as charts) ──
+
+interface HomeFeedCache {
+  at: number;
+  feed: { newAlbums: Collection[]; featured: Collection[] };
+}
+
+export async function getHomeFeedCache(allowStale = false) {
+  const cache = await readJSON<HomeFeedCache | null>(KEYS.homeFeedCache, null);
+  if (!cache) return null;
+  if (!allowStale && Date.now() - cache.at > 6 * 60 * 60 * 1000) return null;
+  return cache.feed;
+}
+
+export async function setHomeFeedCache(feed: HomeFeedCache['feed']): Promise<void> {
+  await writeJSON(KEYS.homeFeedCache, { at: Date.now(), feed });
 }
 
 // ── Daily mixes cache (regenerated once per day) ───────────────────────

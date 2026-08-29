@@ -1,19 +1,25 @@
 /**
- * Onboarding (§9.9) — Spotify-faithful first run (R2, gauntlet-corrected).
+ * Onboarding (§9.9) — Spotify-faithful first run, v3.2.
  *
  * Step 1  "What's your name?"        — signup-style name capture
- * Step 2  "Choose 3 or more artists you like." — centered title, squircle
- *         search, 3-column CIRCLES, white ring + white/black check badge
- *         (pixel-verified vs genuine refs), "More {category}" magenta tile
- * Step 3  "What kind of music do you like?" — colorful genre tiles w/
- *         contrast scrim (WCAG-large) + rotated palette
+ * Step 2  "Choose 3 or more artists you like." — REAL artist photos:
+ *         48 curated A-lister seeds (verified JioSaavn portraits, instant)
+ *         + "More" chunks (seeds → live category batches: Bollywood,
+ *         Punjabi, Hip-Hop, Romance, Indie, Sufi, Retro, Pop) + artist
+ *         search with photos. Photo-less artists get an initials circle.
+ * Step 3  "What kind of music do you like?" — colorful genre tiles.
  *
- * Gauntlet R1 findings baked in: no count FAB (genuine has none — count
- * lives in the CTA), green pill CTA w/ black label on every step, white
- * logo mark, safe-area aware on both platforms, autoFocus name field.
+ * v3.2 persistence (end-to-end fix — the re-ask bug):
+ *  • Gate awaits mindbeat.ready() BEFORE reading onboardingDone (the old
+ *    race read kv before the SQLite store opened → null → re-ask).
+ *  • The done-flag is dual-written: mindbeat kv AND plain AsyncStorage
+ *    (tsf.onboardingDone) — either satisfies the gate, so even a broken
+ *    ledger can never re-trap the user.
+ *  • Progress (step/name/picks/genres) is checkpointed to AsyncStorage on
+ *    every step change — a kill mid-flow resumes where it left off.
+ *  • finish() awaits BOTH durable writes before closing the modal.
  *
- * Feeds MINDBEAT instantly: artists → weight 3.0 seeds, genres → weight 2.2
- * affinity hints (§6.7). Shown once; steps 2–3 are skippable.
+ * Feeds MINDBEAT instantly: artists → weight 3.0 seeds, genres → 2.2 hints.
  */
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -33,7 +39,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { searchSaavnClean } from '../api/saavn';
+import {
+  ARTIST_CATEGORIES,
+  ARTIST_SEEDS,
+  getArtistPhoto,
+  searchSaavnArtists,
+  type ArtistInfo,
+} from '../api/artists';
 import { mindbeat } from '../ai/mindbeat';
 import { Artwork } from './Artwork';
 import { PressableScale } from './PressableScale';
@@ -41,8 +53,8 @@ import { colors, fonts } from '../theme';
 
 /**
  * Genre tiles — keys match GENRE_PRIORS so affinity lines up exactly.
- * Palette rotated for pairwise separability (R1: ΔRGB<60 pairs) and
- * bottom-scrimmed for WCAG-large label contrast.
+ * Palette rotated for pairwise separability and bottom-scrimmed for
+ * WCAG-large label contrast.
  */
 const GENRES: Array<{ key: string; label: string; icon: keyof typeof Ionicons.glyphMap; from: string; to: string }> = [
   { key: 'bollywood', label: 'Bollywood', icon: 'film', from: '#e13300', to: '#ff8a00' },
@@ -59,17 +71,13 @@ const GENRES: Array<{ key: string; label: string; icon: keyof typeof Ionicons.gl
   { key: 'devotional', label: 'Devotional', icon: 'flower', from: '#c2410c', to: '#fb923c' },
 ];
 
-/** Catalog categories. The picker starts on Bollywood; other languages are
- *  reachable via search (genuine behaviour) — no chip row. */
-const CATEGORY = { key: 'hindi', label: 'Bollywood', primary: 'top hindi hits', more: 'best bollywood songs' };
-
 const MIN_ARTISTS = 3;
 const MAX_ARTISTS = 12;
+const SEED_CHUNK = 15; // artists per "More" expansion (seeds are instant)
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** Mirrors WhatsNewDialog's dismissal flag (plain AsyncStorage — independent
- *  of mindbeat's namespaced store so the gate works even pre-boot). */
+/** Mirrors WhatsNewDialog's dismissal flag (plain AsyncStorage). */
 const whatsNewDismissed = async (): Promise<boolean> => {
   try {
     return (await AsyncStorage.getItem('tsf.whatsNewDismissed')) != null;
@@ -78,18 +86,11 @@ const whatsNewDismissed = async (): Promise<boolean> => {
   }
 };
 
-/** Primary artist: strip feats AND comma features ("Pritam, Shilpa Rao"). */
-const primaryArtist = (raw: string): string => {
-  const a = raw
-    .split(' feat')[0]!
-    .split(',')[0]!
-    .trim();
-  return a && a !== 'Unknown artist' ? a : '';
-};
-
-interface ArtistTile {
+interface Progress {
+  step: 'artists' | 'genres';
   name: string;
-  artwork?: string;
+  picked: string[];
+  genres: string[];
 }
 
 type Step = 'name' | 'artists' | 'genres';
@@ -104,24 +105,57 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   const [genres, setGenres] = useState<Set<string>>(new Set());
 
   // artist catalog state
-  const [pool, setPool] = useState<ArtistTile[] | null>(null);
-  const [morePool, setMorePool] = useState<ArtistTile[]>([]);
+  const [shownCount, setShownCount] = useState(SEED_CHUNK);
+  const [livePool, setLivePool] = useState<ArtistInfo[]>([]);
+  const [catIdx, setCatIdx] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [query, setQuery] = useState('');
+  const [searchHits, setSearchHits] = useState<ArtistInfo[] | null>(null);
   const [nameFocus, setNameFocus] = useState(false);
   const nameInput = useRef<TextInput>(null);
 
   const { width: winW } = useWindowDimensions();
   const insets = useSafeAreaInsets();
 
+  /** Checkpoint progress so a mid-flow kill resumes instead of restarting. */
+  const checkpoint = (s: Step, n: string, p: Set<string>, g: Set<string>) => {
+    if (s === 'name') return;
+    const prog: Progress = { step: s, name: n, picked: [...p], genres: [...g] };
+    AsyncStorage.setItem('tsf.onboardingProgress', JSON.stringify(prog)).catch(() => undefined);
+  };
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const done = await mindbeat.kvGet<boolean>('onboardingDone');
+      // ① Wait for the ledger store to OPEN before reading the flag — the
+      //    v3.1 bug read kv during async init (store null → "not done").
+      await Promise.race([mindbeat.ready(), sleep(4000)]);
+      if (cancelled) return;
+      // ② Dual-source done flag: kv OR plain AsyncStorage (belt + braces).
+      let done = false;
+      try {
+        done =
+          (await mindbeat.kvGet<boolean>('onboardingDone')) === true ||
+          (await AsyncStorage.getItem('tsf.onboardingDone')) != null;
+      } catch {
+        done = false;
+      }
       if (done || cancelled) return;
-      // Fresh installs also show the What's-new dialog. As the LATER modal we
-      // would stack on top of it — wait until it is dismissed (600ms polls,
-      // 30s cap).
+      // ③ Resume a killed mid-flow run (progress checkpoint).
+      try {
+        const raw = await AsyncStorage.getItem('tsf.onboardingProgress');
+        if (raw) {
+          const p = JSON.parse(raw) as Progress;
+          setName(p.name ?? '');
+          setPicked(new Set(p.picked ?? []));
+          setGenres(new Set(p.genres ?? []));
+          if (p.step === 'genres' || p.step === 'artists') setStep(p.step);
+        }
+      } catch {
+        /* fresh start */
+      }
+      // ④ Fresh installs also show the What's-new dialog first — wait for
+      //    its dismissal so the two modals never stack (600ms polls, 30s cap).
       if (!(await whatsNewDismissed())) {
         for (let i = 0; i < 50 && !cancelled; i++) {
           await sleep(600);
@@ -135,58 +169,55 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     };
   }, []);
 
-  const extractArtists = (tracks: Awaited<ReturnType<typeof searchSaavnClean>>, existing: Set<string>, cap: number) => {
-    const artists: ArtistTile[] = [];
-    for (const t of tracks) {
-      const a = primaryArtist(t.artist);
-      const k = a.toLowerCase();
-      if (a && !existing.has(k) && !artists.some((x) => x.name.toLowerCase() === k)) {
-        artists.push({ name: a, artwork: t.artwork });
-      }
-      if (artists.length >= cap) break;
-    }
-    return artists;
-  };
-
-  // Load the base pool once when the artists step first shows.
-  useEffect(() => {
-    if (step !== 'artists' || pool) return;
-    (async () => {
-      try {
-        const tracks = await searchSaavnClean(CATEGORY.primary, 40);
-        const seen = new Set<string>();
-        // 15 base tiles → the "More {category}" circle lands on the first
-        // screen (genuine ref), the rest arrive via the More tile.
-        setPool(extractArtists(tracks, seen, 15));
-      } catch {
-        setPool([]);
-      }
-    })();
-  }, [step, pool]);
-
   const doSearch = async () => {
     const q = query.trim();
-    if (!q || pool === null) return;
+    if (!q) {
+      setSearchHits(null);
+      return;
+    }
+    setSearchHits([]); // spinner state
     try {
-      const tracks = await searchSaavnClean(q, 40);
-      const existing = new Set<string>();
-      const found = extractArtists(tracks, existing, 40);
-      setPool(found.length ? found : []);
+      const found = await searchSaavnArtists(q, 36);
+      setSearchHits(found);
+      // Enrich photo-less hits via artist-id lookups (top 6, parallel).
+      const missing = found.filter((a) => !a.image && a.id).slice(0, 6);
+      missing.forEach((a) => {
+        getArtistPhoto(a.id)
+          .then((img) => {
+            if (img) setSearchHits((prev) => (prev ? prev.map((x) => (x.id === a.id ? { ...x, image: img } : x)) : prev));
+          })
+          .catch(() => undefined);
+      });
     } catch {
-      /* keep current pool */
+      setSearchHits([]);
     }
   };
 
-  /** Spotify's "More {category}" tile — expands the grid with a second query. */
+  /** Spotify's grid-end "More" tile — seeds first (instant), then live
+   *  category batches (Bollywood → Punjabi → Hip-Hop → …), endlessly. */
   const loadMore = async () => {
-    if (morePool.length || loadingMore) return;
+    if (loadingMore) return;
+    if (shownCount < ARTIST_SEEDS.length) {
+      setShownCount((c) => Math.min(c + SEED_CHUNK, ARTIST_SEEDS.length));
+      return;
+    }
+    if (catIdx >= ARTIST_CATEGORIES.length) return;
     setLoadingMore(true);
     try {
-      const tracks = await searchSaavnClean(CATEGORY.more, 40);
-      const existing = new Set([...(pool ?? []).map((a) => a.name.toLowerCase()), ...morePool.map((a) => a.name.toLowerCase())]);
-      setMorePool(extractArtists(tracks, existing, 12));
+      const cat = ARTIST_CATEGORIES[catIdx]!;
+      const found = await searchSaavnArtists(cat.query, 12);
+      setLivePool((prev) => {
+        // dedupe against the FULL seed list (not just the shown chunk) so a
+        // later seed expansion can never re-introduce the same artist.
+        const seen = new Set<string>([
+          ...ARTIST_SEEDS.map((a) => a.name.toLowerCase()),
+          ...prev.map((a) => a.name.toLowerCase()),
+        ]);
+        return [...prev, ...found.filter((a) => !seen.has(a.name.toLowerCase()))];
+      });
+      setCatIdx((i) => i + 1);
     } catch {
-      setMorePool([]);
+      setCatIdx((i) => i + 1); // skip a broken category, keep the grid moving
     } finally {
       setLoadingMore(false);
     }
@@ -210,33 +241,51 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     });
   };
 
-  /** Finish — persist everything collected, seed the engine, close. */
+  /** Finish — durable writes FIRST (AsyncStorage + kv), then close.
+   *  The AsyncStorage flag is written before anything else so no failure
+   *  downstream can ever re-trap the user in onboarding. */
   const finish = async () => {
     const cleanName = name.trim().slice(0, 24);
     try {
+      await AsyncStorage.setItem('tsf.onboardingDone', '1');
+      await AsyncStorage.removeItem('tsf.onboardingProgress');
+      if (cleanName) await AsyncStorage.setItem('tsf.userName', cleanName);
+    } catch {
+      /* even if this fails, try the kv write below */
+    }
+    try {
+      await mindbeat.ready();
       if (cleanName) await mindbeat.kvSet('userName', cleanName);
       await mindbeat.setOnboardingSeeds([...picked], [...genres]);
       await mindbeat.kvSet('onboardingDone', true);
     } catch {
-      /* best-effort — never trap the user in onboarding */
+      /* best-effort — the AsyncStorage flag already guarantees no re-ask */
     }
     setVisible(false);
     onDone();
   };
 
+  const goStep = (s: Step) => {
+    checkpoint(s, name, picked, genres);
+    setStep(s);
+  };
+
+  /** The grid: seeds (chunked) + live batches, or search hits. */
   const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const all = [...(pool ?? []), ...morePool];
-    if (!q) return all;
-    const seen = new Set<string>();
-    return all.filter((a) => {
-      if (a.name.toLowerCase().includes(q) && !seen.has(a.name.toLowerCase())) {
-        seen.add(a.name.toLowerCase());
-        return true;
-      }
-      return false;
-    });
-  }, [pool, morePool, query]);
+    if (searchHits) return searchHits;
+    const base = ARTIST_SEEDS.slice(0, shownCount);
+    const seen = new Set(ARTIST_SEEDS.map((a) => a.name.toLowerCase()));
+    const live = livePool.filter((a) => !seen.has(a.name.toLowerCase()));
+    return [...base, ...live];
+  }, [searchHits, shownCount, livePool]);
+
+  const moreLabel =
+    shownCount < ARTIST_SEEDS.length
+      ? 'More artists'
+      : catIdx < ARTIST_CATEGORIES.length
+        ? `More ${ARTIST_CATEGORIES[catIdx]!.label}`
+        : '';
+  const inSearch = !!searchHits;
 
   if (!visible) return null;
 
@@ -280,7 +329,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                   onChangeText={setName}
                   maxLength={24}
                   returnKeyType="done"
-                  onSubmitEditing={() => name.trim() && setStep('artists')}
+                  onSubmitEditing={() => name.trim() && goStep('artists')}
                   onFocus={() => setNameFocus(true)}
                   onBlur={() => setNameFocus(false)}
                   selectionColor={colors.accentBright}
@@ -294,7 +343,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 testID="onb-continue"
                 haptic
                 disabled={!name.trim()}
-                onPress={() => setStep('artists')}
+                onPress={() => goStep('artists')}
                 style={name.trim() ? styles.cta : styles.ctaDim}
               >
                 <Text style={styles.ctaText}>Continue</Text>
@@ -304,7 +353,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         ) : step === 'artists' ? (
           <View style={styles.flex}>
             <View style={styles.topBar}>
-              <PressableScale haptic onPress={() => setStep('name')} style={styles.backBtn} hitSlop={12} accessibilityLabel="Back">
+              <PressableScale haptic onPress={() => goStep('name')} style={styles.backBtn} hitSlop={12} accessibilityLabel="Back">
                 <Ionicons name="chevron-back" size={26} color={colors.text} />
               </PressableScale>
             </View>
@@ -314,24 +363,35 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
               <TextInput
                 testID="onb-search"
                 style={styles.searchInput as never}
-                placeholder="Search"
+                placeholder="Search artists"
                 placeholderTextColor={colors.textDim}
                 value={query}
-                onChangeText={setQuery}
+                onChangeText={(t) => {
+                  setQuery(t);
+                  if (!t.trim()) setSearchHits(null);
+                }}
                 returnKeyType="search"
                 onSubmitEditing={doSearch}
                 selectionColor={colors.accentBright}
               />
+              {query.length > 0 ? (
+                <PressableScale haptic onPress={() => { setQuery(''); setSearchHits(null); }} hitSlop={8}>
+                  <Ionicons name="close" size={18} color={colors.textDim} />
+                </PressableScale>
+              ) : null}
             </View>
             <ScrollView contentContainerStyle={styles.gridPad} showsVerticalScrollIndicator={false}>
-              {pool === null ? (
+              {searchHits && searchHits.length === 0 ? (
                 <View style={styles.loadingWrap}>
-                  <ActivityIndicator color={colors.accentBright} />
+                  <Text style={styles.emptyText}>No artists found for “{query.trim()}”</Text>
                 </View>
               ) : (
                 <View style={styles.grid}>
                   {shown.map((a) => {
                     const on = picked.has(a.name);
+                    // Genuine Spotify: once a pick exists, unselected tiles dim
+                    // so selections pop (critic-verified vs genuine refs).
+                    const dim = picked.size > 0 && !on;
                     return (
                       <PressableScale
                         key={a.name}
@@ -339,13 +399,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                         haptic
                         onPress={() => toggleArtist(a.name)}
                         accessibilityState={{ selected: on }}
-                        style={[styles.artistCell, { width: tileW }]}
+                        style={[styles.artistCell, { width: tileW, opacity: dim ? 0.45 : 1 }]}
                       >
                         <View style={styles.artWrap}>
-                          {/* Genuine picker: circular avatar; selected =
-                           * white ring flush on the photo edge + white
-                           * badge w/ black check at the top-right. */}
-                          <Artwork uri={a.artwork} seed={a.name} size={tileW} variant="circle" />
+                          {/* Genuine picker: circular avatar w/ REAL artist
+                           * photo; selected = white ring flush on the photo
+                           * edge + white badge w/ black check top-right. */}
+                          <Artwork uri={a.image} seed={a.name} initials={a.name} size={tileW} variant="circle" />
                           {on ? (
                             <>
                               <View style={styles.ring} />
@@ -361,12 +421,12 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                       </PressableScale>
                     );
                   })}
-                  {!query.trim() && shown.length > 0 ? (
+                  {!inSearch && moreLabel ? (
                     <PressableScale
                       testID="onb-more"
                       haptic
                       onPress={() => void loadMore()}
-                      accessibilityLabel={`More ${CATEGORY.label}`}
+                      accessibilityLabel={moreLabel}
                       style={[styles.artistCell, { width: tileW }]}
                     >
                       {/* Spotify India's "More {category}" magenta circle */}
@@ -375,8 +435,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                           <ActivityIndicator color="#fff" />
                         ) : (
                           <Text style={styles.moreText} numberOfLines={2}>
-                            More{'\n'}
-                            {CATEGORY.label}
+                            {moreLabel.replace('More ', 'More\n')}
                           </Text>
                         )}
                       </View>
@@ -393,12 +452,12 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                 testID="onb-continue"
                 haptic
                 disabled={!artistsReady}
-                onPress={() => setStep('genres')}
+                onPress={() => goStep('genres')}
                 style={artistsReady ? styles.cta : styles.ctaDim}
               >
                 <Text style={styles.ctaText}>{ctaLabel}</Text>
               </PressableScale>
-              <PressableScale haptic onPress={() => setStep('genres')} style={styles.skip} hitSlop={12}>
+              <PressableScale haptic onPress={() => goStep('genres')} style={styles.skip} hitSlop={12}>
                 <Text style={styles.skipText}>Skip</Text>
               </PressableScale>
             </View>
@@ -406,7 +465,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
         ) : (
           <View style={styles.flex}>
             <View style={styles.topBar}>
-              <PressableScale haptic onPress={() => setStep('artists')} style={styles.backBtn} hitSlop={12} accessibilityLabel="Back">
+              <PressableScale haptic onPress={() => goStep('artists')} style={styles.backBtn} hitSlop={12} accessibilityLabel="Back">
                 <Ionicons name="chevron-back" size={26} color={colors.text} />
               </PressableScale>
             </View>
@@ -430,7 +489,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
                         end={{ x: 1, y: 1 }}
                         style={StyleSheet.absoluteFill}
                       />
-                      {/* contrast scrim under the label (R1: 10/12 failed 3:1) */}
+                      {/* contrast scrim under the label */}
                       <LinearGradient
                         colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.55)']}
                         start={{ x: 0, y: 0.25 }}
@@ -526,7 +585,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   ctaDim: {
-    backgroundColor: '#169C46', // muted green (R2: opacity-dim read muddy)
+    backgroundColor: '#169C46', // muted green
     borderRadius: 999,
     paddingVertical: 15,
     alignItems: 'center',
@@ -547,6 +606,7 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, color: colors.text, fontSize: 14.5, fontFamily: fonts.medium, outlineWidth: 0 } as never,
   loadingWrap: { paddingVertical: 60, alignItems: 'center' },
+  emptyText: { color: colors.textDim, fontSize: 14, fontFamily: fonts.medium, textAlign: 'center', paddingHorizontal: 24 },
   gridPad: { padding: 16, paddingBottom: 150 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   artistCell: { alignItems: 'center' },

@@ -15,7 +15,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import type { Track } from '../types';
-import { getCollectionTracks, searchSaavnClean } from '../api/saavn';
+import { getAlbumTracks, getCollectionTracks, searchSaavnClean } from '../api/saavn';
 import { usePlayer } from '../player/PlayerProvider';
 import { TrackRow } from '../components/TrackRow';
 import { Artwork } from '../components/Artwork';
@@ -35,7 +35,9 @@ export function CollectionScreen() {
   const { collection, tracks: routeTracks } = route.params;
 
   const [tracks, setTracks] = useState<Track[] | null>(routeTracks ?? null);
-  const [loading, setLoading] = useState(!routeTracks && !!(collection.kind === 'chart' || collection.kind === 'search'));
+  const [loading, setLoading] = useState(
+    !routeTracks && !!(collection.kind === 'chart' || collection.kind === 'search' || collection.kind === 'album'),
+  );
   const [failed, setFailed] = useState(false);
   const [menuTrack, setMenuTrack] = useState<Track | null>(null);
 
@@ -47,6 +49,8 @@ export function CollectionScreen() {
         let list: Track[] = [];
         if (collection.kind === 'chart') {
           list = await getCollectionTracks(collection.id);
+        } else if (collection.kind === 'album') {
+          list = await getAlbumTracks(collection.id);
         } else if (collection.kind === 'search' && collection.query) {
           list = await searchSaavnClean(collection.query, 40);
         }

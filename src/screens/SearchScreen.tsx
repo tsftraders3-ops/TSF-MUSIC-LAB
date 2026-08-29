@@ -1,10 +1,13 @@
 /**
- * Search — authentic Spotify Android search:
+ * Search — authentic Spotify Android search, v3.2:
  *   #242424 rounded search field ("What do you want to listen to?") →
  *   recent-search rows → "Browse all" 2-column grid of solid-color genre
- *   cards, each with an album cover rotated ~25° peeking out the bottom-
- *   right corner — Spotify's most iconic grid. A violet TSF AI card
- *   leads the grid.
+ *   cards w/ rotated album art (18 categories, curated queries) → TSF AI
+ *   card. Keyword|Vibe mode toggle (§9.8).
+ *
+ * Results (keyword mode): Spotify's "Top result" hero card (artwork,
+ * title, artist, play FAB) over a "Songs" list — replacing the old flat
+ * row dump.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -35,6 +38,7 @@ import {
   getRecentSearches,
   pushRecentSearch,
 } from '../storage/store';
+import { Artwork } from '../components/Artwork';
 import { TrackRow } from '../components/TrackRow';
 import { PressableScale } from '../components/PressableScale';
 import { colors, fonts, radius, spacing, genreGradient } from '../theme';
@@ -43,16 +47,22 @@ import type { RootStackParamList } from './navigation';
 const GENRES: Array<{ label: string; query: string }> = [
   { label: 'Bollywood', query: 'bollywood hits' },
   { label: 'Punjabi', query: 'punjabi hits' },
-  { label: 'Pop', query: 'pop hits' },
   { label: 'Hip-Hop', query: 'rap hip hop' },
+  { label: 'Pop', query: 'pop hits' },
+  { label: 'Indie', query: 'indie india songs' },
+  { label: 'Romance', query: 'romantic love songs' },
   { label: 'Rock', query: 'rock hits' },
   { label: 'Lo-Fi', query: 'lofi songs' },
-  { label: 'Devotional', query: 'devotional bhajan' },
   { label: 'Party', query: 'party dance hits' },
-  { label: 'Romance', query: 'romantic love songs' },
   { label: 'Workout', query: 'workout gym' },
   { label: 'Sufi', query: 'sufi songs' },
+  { label: 'Devotional', query: 'devotional bhajan' },
+  { label: 'Ghazal', query: 'ghazal' },
   { label: '90s Hits', query: '90s hindi songs' },
+  { label: '2000s Hits', query: '2000s hindi songs' },
+  { label: 'Dance', query: 'dance edm songs' },
+  { label: 'Sad Songs', query: 'sad songs hindi' },
+  { label: 'Instrumental', query: 'instrumental' },
 ];
 
 export function SearchScreen() {
@@ -161,6 +171,8 @@ export function SearchScreen() {
   };
 
   const showBrowse = !query && !searched;
+  const top = results[0];
+  const rest = results.slice(1);
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
@@ -232,7 +244,19 @@ export function SearchScreen() {
             <View>
               {recentSearches.length > 0 ? (
                 <View style={styles.recentSection}>
-                  <Text style={styles.recentTitle}>Recent searches</Text>
+                  <View style={styles.recentHeader}>
+                    <Text style={styles.recentTitle}>Recent searches</Text>
+                    <PressableScale
+                      haptic
+                      hitSlop={8}
+                      onPress={() => {
+                        void clearRecentSearches().then(() => setRecentSearches([]));
+                      }}
+                      accessibilityLabel="Clear recent searches"
+                    >
+                      <Ionicons name="trash-outline" size={17} color={colors.textDim} />
+                    </PressableScale>
+                  </View>
                   {recentSearches.slice(0, 4).map((s) => (
                     <Pressable
                       key={s}
@@ -298,20 +322,53 @@ export function SearchScreen() {
         </View>
       ) : (
         <FlatList
-          data={results}
+          data={rest}
           keyExtractor={(t) => t.id}
           renderItem={({ item, index }) => (
-            <TrackRow track={item} onPress={() => play(index)} showHeart={false} />
+            <TrackRow track={item} onPress={() => play(index + 1)} showHeart={false} />
           )}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           contentContainerStyle={{ paddingBottom: 170 }}
           ListHeaderComponent={
-            degraded ? (
-              <Text style={styles.degradedNote}>
-                Full-length streams unavailable — some results are 30s previews
-              </Text>
-            ) : null
+            <View>
+              {degraded ? (
+                <Text style={styles.degradedNote}>
+                  Full-length streams unavailable — some results are 30s previews
+                </Text>
+              ) : null}
+              {/* ── Top result — Spotify's hero card over the songs list ── */}
+              {top ? (
+                <View style={styles.topResultWrap}>
+                  <Text style={styles.songsHeader}>Top result</Text>
+                  <PressableScale
+                    testID="search-top-result"
+                    haptic
+                    onPress={() => play(0)}
+                    style={styles.topCard}
+                  >
+                    <Artwork uri={top.artwork} seed={top.id} size={92} variant="card" />
+                    <View style={styles.topCardInfo}>
+                      <Text style={styles.topCardTitle} numberOfLines={2}>
+                        {top.title}
+                      </Text>
+                      <View style={styles.topCardMetaRow}>
+                        <View style={styles.topCardType}>
+                          <Text style={styles.topCardTypeText}>Song</Text>
+                        </View>
+                        <Text style={styles.topCardArtist} numberOfLines={1}>
+                          {top.artist}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.topPlayFab}>
+                      <Ionicons name="play" size={22} color="#000" />
+                    </View>
+                  </PressableScale>
+                  <Text style={styles.songsHeader}>Songs</Text>
+                </View>
+              ) : null}
+            </View>
           }
         />
       )}
@@ -356,6 +413,7 @@ const styles = StyleSheet.create({
   },
   input: { flex: 1, color: colors.text, fontSize: 15.5, fontFamily: fonts.regular },
   recentSection: { paddingTop: spacing.md, paddingBottom: spacing.lg, gap: 2 },
+  recentHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   recentTitle: {
     color: colors.text,
     fontSize: 17,
@@ -422,6 +480,54 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // ── Top result hero ─────────────────────────────────────────────────
+  topResultWrap: { paddingHorizontal: spacing.lg },
+  songsHeader: {
+    color: colors.text,
+    fontSize: 19,
+    fontWeight: '800',
+    fontFamily: fonts.extrabold,
+    letterSpacing: -0.3,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm + 2,
+  },
+  topCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#181818',
+    borderRadius: 6,
+    padding: 12,
+    marginBottom: 6,
+    overflow: 'hidden',
+  },
+  topCardInfo: { flex: 1, gap: 6 },
+  topCardTitle: {
+    color: colors.text,
+    fontSize: 19,
+    fontWeight: '800',
+    fontFamily: fonts.extrabold,
+    letterSpacing: -0.3,
+    lineHeight: 23,
+  },
+  topCardMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  topCardType: {
+    backgroundColor: '#2e2e2e',
+    borderRadius: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  topCardTypeText: { color: colors.text, fontSize: 11.5, fontWeight: '700', fontFamily: fonts.bold },
+  topCardArtist: { color: colors.textDim, fontSize: 13, fontFamily: fonts.medium, flexShrink: 1 },
+  topPlayFab: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: colors.accentBright,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 6,
   },
   centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, padding: spacing.xl },
   noResults: { color: colors.text, fontSize: 18, fontWeight: '700', fontFamily: fonts.bold },

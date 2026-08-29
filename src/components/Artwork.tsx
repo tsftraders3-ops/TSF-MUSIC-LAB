@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { Image, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Image, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme';
@@ -33,6 +33,7 @@ export function Artwork({
   style,
   variant = 'rounded',
   liked = false,
+  initials,
 }: {
   uri?: string;
   seed: string;
@@ -41,6 +42,9 @@ export function Artwork({
   variant?: 'card' | 'rounded' | 'mini' | 'circle' | 'square';
   /** Render Spotify's Liked Songs gradient heart tile. */
   liked?: boolean;
+  /** When no image: render the letter(s) instead of the notes icon
+   *  (artist circles without a photo — v3.2 honest fallback). */
+  initials?: string;
 }) {
   const [failed, setFailed] = React.useState(false);
   const borderRadius =
@@ -77,7 +81,13 @@ export function Artwork({
           end={{ x: 1, y: 1 }}
           style={[styles.gradient, { borderRadius }]}
         >
-          <Ionicons name="musical-notes" size={Math.max(14, size * 0.28)} color="rgba(255,255,255,0.85)" />
+          {initials ? (
+            <Text style={[styles.initials, { fontSize: Math.max(13, size * 0.3) }]} allowFontScaling={false}>
+              {initials.slice(0, 2).toUpperCase()}
+            </Text>
+          ) : (
+            <Ionicons name="musical-notes" size={Math.max(14, size * 0.28)} color="rgba(255,255,255,0.85)" />
+          )}
         </LinearGradient>
       </View>
     );
@@ -103,6 +113,12 @@ const styles = StyleSheet.create({
   imageWrap: { backgroundColor: colors.surface },
   imageFill: { width: '100%', height: '100%' },
   fallback: { overflow: 'hidden' },
+  initials: {
+    color: 'rgba(255,255,255,0.94)',
+    fontWeight: '800',
+    fontFamily: 'Figtree-800',
+    letterSpacing: 0.5,
+  },
   gradient: {
     width: '100%',
     height: '100%',

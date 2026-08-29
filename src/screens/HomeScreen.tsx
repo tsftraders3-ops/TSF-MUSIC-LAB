@@ -1,15 +1,17 @@
 /**
- * Home — authentic Spotify Android home architecture:
+ * Home — authentic Spotify Android home architecture, v3.2 DEEP feed:
  *
- *   profile avatar (far left) + filter chips (All / Music / AI — green
- *   active pill w/ black text) → 8-tile 2-column quick-shortcut grid
- *   (#2A2A2A, 56px, art flush-left) → Made for you (AI Daily Mixes +
- *   create-with-AI card) → Jump back in (recents, "Album • Artist"
- *   subtitles) → Trending now (safety-filtered) → Because you listened
- *   (artist radios) → charts.
+ *   profile avatar + filter chips (All / Music / AI) → 8-tile shortcut
+ *   grid → Made for {name} (Daily Mixes + AI card) → Now Sound (daylist)
+ *   → Jump back in → Popular artists (REAL artist photos, circular rail)
+ *   → Trending now → On the Rise → Because you listened → New releases
+ *   (JioSaavn editorial albums) → Featured playlists (editorial) →
+ *   Popular charts → footer.
  *
- * Everything algorithmic passes the content-safety filter, so nothing
- * explicit ever lands on this screen uninvited.
+ * The editorial feed (content.getHomepageData) + artist rail make the
+ * screen scroll as deep as Spotify from the very first session, with or
+ * without a listening profile. Everything algorithmic stays safety-
+ * filtered; every editorial shelf renders through collectionIsClean.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -25,26 +27,39 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Collection, DailyMix, Track } from '../types';
 import {
   collectionIsClean,
   getCharts,
   getCollectionTracks,
+  getHomepageFeed,
   getTrending,
 } from '../api/saavn';
+import { ARTIST_SEEDS, lookupArtistPhoto, type ArtistInfo } from '../api/artists';
 import { getBecauseYouListened, getDailyMixes } from '../ai/engine';
 import { mindbeat } from '../ai/mindbeat';
 import type { NowSoundCard } from '../ai/surfaces/daylist';
 import type { OnTheRiseCard } from '../ai/surfaces/ontherise';
-import { getChartsCache, getFavorites, getRecents, setChartsCache } from '../storage/store';
+import {
+  getChartsCache,
+  getFavorites,
+  getHomeFeedCache,
+  getRecents,
+  setChartsCache,
+  setHomeFeedCache,
+} from '../storage/store';
 import { usePlayer } from '../player/PlayerProvider';
 import { QuickTile, Shelf, ShelfCard } from '../components/Shelf';
+import { Artwork } from '../components/Artwork';
 import { ShelfSkeleton } from '../components/ShelfSkeleton';
 import { PressableScale } from '../components/PressableScale';
 import { colors, fonts, radius, spacing } from '../theme';
 import type { RootStackParamList } from './navigation';
 
 type Chip = 'all' | 'music' | 'ai';
+
+const POPULAR_ARTIST_COUNT = 10;
 
 export function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -60,6 +75,9 @@ export function HomeScreen() {
   const [favorites, setFavorites] = useState<Track[]>([]);
   const [nowSound, setNowSound] = useState<NowSoundCard | null>(null);
   const [onTheRise, setOnTheRise] = useState<OnTheRiseCard | null>(null);
+  const [newAlbums, setNewAlbums] = useState<Collection[]>([]);
+  const [featured, setFeatured] = useState<Collection[]>([]);
+  const [popularArtists, setPopularArtists] = useState<ArtistInfo[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [offline, setOffline] = useState(false);
   const [userName, setUserName] = useState('');
@@ -84,62 +102,149 @@ export function HomeScreen() {
     [nav],
   );
 
-  const load = useCallback(async (force = false) => {
-    const [rec, favs] = await Promise.all([getRecents(), getFavorites()]);
-    setRecents(rec);
-    setFavorites(favs);
-
-    if (!force) {
-      const cached = await getChartsCache();
-      if (cached && cached.length) setCharts(cached.map((s) => s.collection));
-    }
-
-    // AI surfaces first — they personalize the whole screen.
-    // MINDBEAT surfaces (Mixes v2 / Now Sound / On the Rise) with the v2.1
-    // engine as the graceful fallback (ladder §10.4).
-    mindbeat
-      .dailyMixes()
-      .then((v2) => (v2.length ? setMixes(v2) : getDailyMixes().then(setMixes)))
-      .catch(() => getDailyMixes().then(setMixes).catch(() => setMixes([])));
-    getBecauseYouListened(2)
-      .then(setBecause)
-      .catch(() => setBecause([]));
-    mindbeat.nowSound().then(setNowSound).catch(() => undefined);
-    mindbeat.onTheRise().then(setOnTheRise).catch(() => undefined);
-
+  /** Popular artists: profile top artists first, onboarding seeds next,
+   *  curated A-listers filling the rail to a full row. Photos resolve from
+   *  the instant seed map; unknown names get at most 6 live lookups and an
+   *  honest initials circle otherwise. */
+  const loadPopularArtists = useCallback(async () => {
     try {
-      const [trend, chartList] = await Promise.all([
-        getTrending(14).catch(() => [] as Track[]),
-        getCharts().catch(() => [] as Collection[]),
-      ]);
-      if (trend.length) setTrending(trend);
-      if (chartList.length) {
-        const cleanCharts = chartList.filter(collectionIsClean);
-        setCharts(cleanCharts);
-        // Cache chart metadata for instant cold starts.
-        getCollectionTracks(cleanCharts[0]?.id ?? '')
-          .then((tracks) => {
-            if (cleanCharts.length && tracks.length) {
-              setChartsCache(cleanCharts.map((collection) => ({ collection, tracks: [] })));
-            }
+      await mindbeat.ready();
+    } catch {
+      /* rail still renders from seeds */
+    }
+    let names: string[] = [];
+    try {
+      names = mindbeat.topArtistNames(8);
+    } catch {
+      names = [];
+    }
+    try {
+      const seeds = (await mindbeat.kvGet<string[]>('onboardingSeeds')) ?? [];
+      names = [...names, ...seeds];
+    } catch {
+      /* seeds optional */
+    }
+    const seen = new Set<string>();
+    for (const s of ARTIST_SEEDS) {
+      if (names.length >= POPULAR_ARTIST_COUNT) break;
+      if (!seen.has(s.name.toLowerCase())) names.push(s.name);
+    }
+    const unique: string[] = [];
+    for (const n of names) {
+      const k = n.trim().toLowerCase();
+      if (k && !seen.has(k)) {
+        seen.add(k);
+        unique.push(n.trim());
+      }
+      if (unique.length >= POPULAR_ARTIST_COUNT) break;
+    }
+    const seedMap = new Map(ARTIST_SEEDS.map((a) => [a.name.toLowerCase(), a]));
+    const rail: ArtistInfo[] = unique.map(
+      (n) => seedMap.get(n.toLowerCase()) ?? { name: n },
+    );
+    setPopularArtists(rail);
+    // Live photos only for the first few unknowns (network budget).
+    rail
+      .filter((a) => !a.image)
+      .slice(0, 6)
+      .forEach((a, i) => {
+        lookupArtistPhoto(a.name)
+          .then((img) => {
+            if (!img) return;
+            setPopularArtists((prev) => prev.map((x) => (x.name === a.name ? { ...x, image: img } : x)));
           })
           .catch(() => undefined);
+        void i;
+      });
+  }, []);
+
+  const loadFeed = useCallback(async (force = false) => {
+    if (!force) {
+      const cached = await getHomeFeedCache();
+      if (cached) {
+        setNewAlbums(cached.newAlbums.filter(collectionIsClean));
+        setFeatured(cached.featured.filter(collectionIsClean));
       }
-      setOffline(false);
-      if (!trend.length && !chartList.length) setOffline(true);
+    }
+    try {
+      const feed = await getHomepageFeed();
+      const cleanAlbums = feed.newAlbums.filter(collectionIsClean).slice(0, 12);
+      const cleanFeatured = feed.featured.filter(collectionIsClean).slice(0, 12);
+      if (cleanAlbums.length) setNewAlbums(cleanAlbums);
+      if (cleanFeatured.length) setFeatured(cleanFeatured);
+      if (cleanAlbums.length || cleanFeatured.length) {
+        void setHomeFeedCache({ newAlbums: cleanAlbums, featured: cleanFeatured });
+      }
     } catch {
-      setOffline(true);
+      /* cached shelves (if any) stay up */
     }
   }, []);
+
+  const load = useCallback(
+    async (force = false) => {
+      const [rec, favs] = await Promise.all([getRecents(), getFavorites()]);
+      setRecents(rec);
+      setFavorites(favs);
+
+      if (!force) {
+        const cached = await getChartsCache();
+        if (cached && cached.length) setCharts(cached.map((s) => s.collection));
+      }
+
+      // AI surfaces first — they personalize the whole screen. MINDBEAT
+      // surfaces (Mixes v2 / Now Sound / On the Rise) with the v2.1 engine
+      // as the graceful fallback (ladder §10.4).
+      mindbeat
+        .dailyMixes()
+        .then((v2) => (v2.length ? setMixes(v2) : getDailyMixes().then(setMixes)))
+        .catch(() => getDailyMixes().then(setMixes).catch(() => setMixes([])));
+      getBecauseYouListened(2)
+        .then(setBecause)
+        .catch(() => setBecause([]));
+      mindbeat.nowSound().then(setNowSound).catch(() => undefined);
+      mindbeat.onTheRise().then(setOnTheRise).catch(() => undefined);
+      void loadPopularArtists();
+      void loadFeed(force);
+
+      try {
+        const [trend, chartList] = await Promise.all([
+          getTrending(14).catch(() => [] as Track[]),
+          getCharts().catch(() => [] as Collection[]),
+        ]);
+        if (trend.length) setTrending(trend);
+        if (chartList.length) {
+          const cleanCharts = chartList.filter(collectionIsClean);
+          setCharts(cleanCharts);
+          getCollectionTracks(cleanCharts[0]?.id ?? '')
+            .then((tracks) => {
+              if (cleanCharts.length && tracks.length) {
+                setChartsCache(cleanCharts.map((collection) => ({ collection, tracks: [] })));
+              }
+            })
+            .catch(() => undefined);
+        }
+        setOffline(false);
+        if (!trend.length && !chartList.length) setOffline(true);
+      } catch {
+        setOffline(true);
+      }
+    },
+    [loadFeed, loadPopularArtists],
+  );
 
   useEffect(() => {
     load();
   }, [load]);
 
-  // First name → "Made for {name}" (desktop-Spotify behaviour; falls back to
-  // "Made for you" when unset). The profile-change subscription covers the
-  // exact moment onboarding completes (seeding triggers a rebuild).
+  // First name → "Made for {name}". AsyncStorage read first (instant — the
+  // kv copy can lag behind the ledger opening on cold start), then kv, then
+  // the profile subscription for the exact onboarding-complete moment.
+  // Subsequent reads never CLEAR a known-good name (kv may briefly be empty
+  // on cold web/crash-recovery boots).
   useEffect(() => {
+    AsyncStorage.getItem('tsf.userName')
+      .then((n) => n && setUserName(n))
+      .catch(() => undefined);
     mindbeat
       .kvGet<string>('userName')
       .then((n) => n && setUserName(n))
@@ -147,7 +252,7 @@ export function HomeScreen() {
     return mindbeat.onProfile(() => {
       mindbeat
         .kvGet<string>('userName')
-        .then((n) => setUserName(n ?? ''))
+        .then((n) => n && setUserName(n))
         .catch(() => undefined);
     });
   }, []);
@@ -199,6 +304,14 @@ export function HomeScreen() {
       onPress: () => play(recents, Math.max(0, recents.findIndex((r) => r.id === t.id))),
     }),
   );
+  if (newAlbums.length > 0)
+    quickTiles.push({
+      title: 'New releases',
+      subtitle: 'Fresh albums',
+      artwork: newAlbums[0].artwork,
+      seed: 'new-releases',
+      onPress: () => nav.navigate('Collection', { collection: newAlbums[0] }),
+    });
   if (quickTiles.length > 0)
     quickTiles.push({
       title: 'Create with AI',
@@ -208,10 +321,22 @@ export function HomeScreen() {
     });
   const quickTileList = quickTiles.slice(0, 8);
 
+  const openArtist = (artist: string) =>
+    nav.navigate('Collection', {
+      collection: {
+        id: `artist-${artist}`,
+        title: artist,
+        subtitle: 'Artist',
+        artwork: popularArtists.find((a) => a.name === artist)?.image ?? '',
+        kind: 'search',
+        query: artist,
+      },
+    });
+
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 170 }}
+        contentContainerStyle={{ paddingBottom: 190 }}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -233,7 +358,7 @@ export function HomeScreen() {
             onPress={() => nav.navigate('Stats')}
             style={styles.avatar}
           >
-            <Text style={styles.avatarText}>T</Text>
+            <Text style={styles.avatarText}>{(userName || 'T').slice(0, 1).toUpperCase()}</Text>
           </PressableScale>
           <View style={styles.chipRow}>
             {(['all', 'music', 'ai'] as Chip[]).map((c) => (
@@ -282,23 +407,6 @@ export function HomeScreen() {
           <ShelfSkeleton />
         ) : (
           <>
-            {/* ── Now Sound (daylist §9.4) — the time-aware shelf ─────── */}
-            {nowSound && nowSound.tracks.length > 0 && showAI ? (
-              <Shelf title="Now Sound">
-                <ShelfCard
-                  title={nowSound.title}
-                  subtitle={nowSound.subtitle}
-                  artwork={nowSound.tracks[0]?.artwork ?? ''}
-                  seed={nowSound.id}
-                  size={150}
-                  onPress={() =>
-                    openTrackCollection(nowSound.title, nowSound.tracks as unknown as Track[])
-                  }
-                />
-                <AICreateCard onPress={() => nav.navigate('AI')} />
-              </Shelf>
-            ) : null}
-
             {/* ── Made for you / Made for {name} (AI Daily Mixes) ────── */}
             {hasMixes && showAI ? (
               <Shelf title={userName ? `Made for ${userName}` : 'Made for you'}>
@@ -317,22 +425,20 @@ export function HomeScreen() {
               </Shelf>
             ) : null}
 
-            {/* ── On the Rise (§9.6) — the weekly discovery flagship ──── */}
-            {onTheRise && onTheRise.tracks.length > 2 && showAI ? (
-              <Shelf title="On the Rise">
-                {onTheRise.tracks.slice(0, 10).map((t) => (
-                  <ShelfCard
-                    key={t.id}
-                    title={t.title}
-                    subtitle={`via ${t.viaArtist}`}
-                    artwork={t.artwork}
-                    seed={`rise-${t.id}`}
-                    size={150}
-                    onPress={() =>
-                      openTrackCollection('On the Rise', onTheRise.tracks as unknown as Track[])
-                    }
-                  />
-                ))}
+            {/* ── Now Sound (daylist §9.4) — the time-aware shelf ─────── */}
+            {nowSound && nowSound.tracks.length > 0 && showAI ? (
+              <Shelf title="Now Sound">
+                <ShelfCard
+                  title={nowSound.title}
+                  subtitle={nowSound.subtitle}
+                  artwork={nowSound.tracks[0]?.artwork ?? ''}
+                  seed={nowSound.id}
+                  size={150}
+                  onPress={() =>
+                    openTrackCollection(nowSound.title, nowSound.tracks as unknown as Track[])
+                  }
+                />
+                <AICreateCard onPress={() => nav.navigate('AI')} />
               </Shelf>
             ) : null}
 
@@ -349,6 +455,35 @@ export function HomeScreen() {
                     size={150}
                     onPress={() => play(recents, Math.max(0, recents.findIndex((r) => r.id === t.id)))}
                   />
+                ))}
+              </Shelf>
+            ) : null}
+
+            {/* ── Popular artists — REAL photos, circular rail ─────────── */}
+            {popularArtists.length > 0 ? (
+              <Shelf title="Popular artists">
+                {popularArtists.map((a) => (
+                  <PressableScale
+                    key={a.name}
+                    haptic
+                    testID="home-artist"
+                    onPress={() => openArtist(a.name)}
+                    style={styles.artistCell}
+                  >
+                    <Artwork
+                      uri={a.image}
+                      seed={a.name}
+                      initials={a.name}
+                      size={124}
+                      variant="circle"
+                    />
+                    <View style={{ gap: 2 }}>
+                      <Text style={styles.artistName} numberOfLines={1}>
+                        {a.name}
+                      </Text>
+                      <Text style={styles.artistSub}>Artist</Text>
+                    </View>
+                  </PressableScale>
                 ))}
               </Shelf>
             ) : null}
@@ -374,26 +509,90 @@ export function HomeScreen() {
               </Shelf>
             ) : null}
 
+            {/* ── On the Rise (§9.6) — the weekly discovery flagship ──── */}
+            {onTheRise && onTheRise.tracks.length > 2 && showAI ? (
+              <Shelf title="On the Rise">
+                {onTheRise.tracks.slice(0, 10).map((t) => (
+                  <ShelfCard
+                    key={t.id}
+                    title={t.title}
+                    subtitle={`via ${t.viaArtist}`}
+                    artwork={t.artwork}
+                    seed={`rise-${t.id}`}
+                    size={150}
+                    onPress={() =>
+                      openTrackCollection('On the Rise', onTheRise.tracks as unknown as Track[])
+                    }
+                  />
+                ))}
+              </Shelf>
+            ) : null}
+
             {/* ── Because you listened ───────────────────────────────── */}
-            {because.map(({ artist }) => (
+            {because.map(({ artist, seedTrack }) => (
               <Shelf key={artist} title={`Because you listened to ${artist}`}>
                 <ArtistRadioCard
                   artist={artist}
-                  onPress={() =>
-                    nav.navigate('Collection', {
-                      collection: {
-                        id: `artist-${artist}`,
-                        title: artist,
-                        subtitle: 'Artist radio',
-                        artwork: '',
-                        kind: 'search',
-                        query: artist,
-                      },
-                    })
-                  }
+                  image={popularArtists.find((a) => a.name === artist)?.image}
+                  onPress={() => openArtist(artist)}
                 />
+                {seedTrack ? (
+                  <ShelfCard
+                    title={seedTrack.title}
+                    subtitle={seedTrack.artist}
+                    artwork={seedTrack.artwork}
+                    seed={`because-${seedTrack.id}`}
+                    size={150}
+                    onPress={() =>
+                      nav.navigate('Collection', {
+                        collection: {
+                          id: `artist-${artist}`,
+                          title: artist,
+                          subtitle: 'Artist radio',
+                          artwork: seedTrack.artwork,
+                          kind: 'search',
+                          query: artist,
+                        },
+                      })
+                    }
+                  />
+                ) : null}
               </Shelf>
             ))}
+
+            {/* ── New releases (JioSaavn editorial albums) ─────────────── */}
+            {newAlbums.length > 0 ? (
+              <Shelf title="New releases">
+                {newAlbums.map((c) => (
+                  <ShelfCard
+                    key={c.id}
+                    title={c.title}
+                    subtitle={c.subtitle}
+                    artwork={c.artwork}
+                    seed={`album-${c.id}`}
+                    size={150}
+                    onPress={() => nav.navigate('Collection', { collection: c })}
+                  />
+                ))}
+              </Shelf>
+            ) : null}
+
+            {/* ── Featured playlists (editorial) ───────────────────────── */}
+            {featured.length > 0 ? (
+              <Shelf title="Featured playlists">
+                {featured.map((c) => (
+                  <ShelfCard
+                    key={c.id}
+                    title={c.title}
+                    subtitle={c.subtitle}
+                    artwork={c.artwork}
+                    seed={`feat-${c.id}`}
+                    size={150}
+                    onPress={() => nav.navigate('Collection', { collection: c })}
+                  />
+                ))}
+              </Shelf>
+            ) : null}
 
             {/* ── Popular charts ─────────────────────────────────────── */}
             {charts.length > 0 ? (
@@ -415,6 +614,12 @@ export function HomeScreen() {
             {!hasMixes && recents.length === 0 && (!trending || trending.length === 0) ? (
               <EmptyHome onGoAI={() => nav.navigate('AI')} />
             ) : null}
+
+            {/* ── Footer — Spotify's quiet end-of-feed divider ─────────── */}
+            <View style={styles.footerDivider}>
+              <View style={styles.footerRule} />
+              <Text style={styles.footerText}>TSF Music · Music for everyone</Text>
+            </View>
           </>
         )}
       </ScrollView>
@@ -431,13 +636,11 @@ function quickTileWidth(): number {
   return Math.floor((globalWidth - 32 - 8) / 2);
 }
 
-/** Artist radio card — opens a search collection (Spotify artist-card style). */
-function ArtistRadioCard({ artist, onPress }: { artist: string; onPress: () => void }) {
+/** Artist radio card — circular photo + name (Spotify artist-card style). */
+function ArtistRadioCard({ artist, image, onPress }: { artist: string; image?: string; onPress: () => void }) {
   return (
-    <PressableScale onPress={onPress} haptic style={{ width: 150, gap: 8 }}>
-      <View style={styles.artistCard}>
-        <Ionicons name="radio-outline" size={26} color={colors.textDim} />
-      </View>
+    <PressableScale onPress={onPress} haptic style={{ width: 124, gap: 8 }}>
+      <Artwork uri={image} seed={artist} initials={artist} size={124} variant="circle" />
       <View style={{ gap: 2 }}>
         <Text style={styles.artistName} numberOfLines={2}>
           {artist}
@@ -534,20 +737,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.lg,
   },
-  artistCard: {
-    width: 150,
-    height: 150,
-    borderRadius: 100,
-    backgroundColor: colors.elevated,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  artistCell: { width: 124, alignItems: 'center' },
   artistName: {
     color: colors.text,
     fontSize: 13.5,
     fontWeight: '700',
     fontFamily: fonts.bold,
     lineHeight: 17,
+    marginTop: 8,
+    maxWidth: 124,
   },
   artistSub: { color: colors.textDim, fontSize: 13, fontFamily: fonts.regular },
   aiCard: {
@@ -590,4 +788,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   emptyBtnText: { color: colors.accentDeep, fontSize: 14, fontWeight: '800', fontFamily: fonts.bold },
+  footerDivider: { alignItems: 'center', paddingTop: spacing.xl + 8, gap: 12 },
+  footerRule: { height: StyleSheet.hairlineWidth, backgroundColor: '#3d3d3d', width: '72%' },
+  footerText: { color: colors.textFaint, fontSize: 12, fontFamily: fonts.medium, paddingBottom: 4 },
 });

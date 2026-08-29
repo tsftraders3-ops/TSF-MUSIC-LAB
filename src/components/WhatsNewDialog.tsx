@@ -11,14 +11,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { PressableScale } from './PressableScale';
 import { colors, fonts, radius, spacing } from '../theme';
 
-const SEEN_KEY = 'tsf.whatsNew.v3_1_0';
+const SEEN_KEY = 'tsf.whatsNew.v3_2_0';
 /** Set on every close — Onboarding polls it before showing (see Onboarding.tsx). */
 const WHATSNEW_DISMISSED_KEY = 'tsf.whatsNewDismissed';
 
 const CHANGES = [
-  'New first-run setup: tell us your name, pick artists, choose genres',
-  'Your picks instantly train radio, Daily Mixes and Smart Shuffle',
-  'Home now says “Made for you” — with your name',
+  'Onboarding now shows REAL artist photos — Arijit, Diljit, AP Dhillon and 45+ more',
+  'Home got much deeper: Popular artists, New releases, Featured playlists and charts',
+  'Search got a Top result card and a bigger Browse grid',
+  'Sharp new app icon and splash — plus your setup is never asked twice',
 ];
 
 export function WhatsNewDialog() {
@@ -57,7 +58,7 @@ export function WhatsNewDialog() {
             <Ionicons name="sparkles" size={20} color={colors.textOnGreen} />
           </View>
           <Text style={styles.title}>What&apos;s new</Text>
-          <Text style={styles.version}>TSF Music 3.0.0 · MINDBEAT</Text>
+          <Text style={styles.version}>TSF Music 3.2.0 · Fresh Look</Text>
           <View style={styles.list}>
             {CHANGES.map((c) => (
               <View key={c} style={styles.row}>
@@ -66,7 +67,7 @@ export function WhatsNewDialog() {
               </View>
             ))}
           </View>
-          <PressableScale haptic scaleTo={0.97} style={styles.btn} onPress={close}>
+          <PressableScale haptic scaleTo={0.97} style={styles.btn} onPress={close} testID="whatsnew-continue">
             <Text style={styles.btnText}>Let&apos;s go</Text>
           </PressableScale>
         </View>

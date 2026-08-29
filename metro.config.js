@@ -20,6 +20,7 @@ const WEB_MODULE_ALIASES = {
 const WEB_PATH_REDIRECTS = [
   { suffix: path.join('src', 'api', 'saavn.ts'), to: path.join(projectRoot, 'src/webmocks/saavn.ts') },
   { suffix: path.join('src', 'api', 'music.ts'), to: path.join(projectRoot, 'src/webmocks/music.ts') },
+  { suffix: path.join('src', 'api', 'artists.ts'), to: path.join(projectRoot, 'src/webmocks/artists.ts') },
   // MINDBEAT: the SQLite ledger store has no web build — the in-memory
   // store exports the same createLedgerStore() signature (harness parity).
   { suffix: path.join('src', 'ai', 'core', 'storeSqlite.ts'), to: path.join(projectRoot, 'src/ai/core/storeMemory.ts') },

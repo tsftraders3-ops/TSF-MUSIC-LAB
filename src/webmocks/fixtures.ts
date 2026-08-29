@@ -7,7 +7,7 @@
 
 import type { Track, Collection } from '../types';
 
-const art = {
+export const art = {
   cocktail2: 'https://c.saavncdn.com/689/Cocktail-2-Hindi-2026-20260629161048-500x500.jpg',
   mashooqa: 'https://c.saavncdn.com/465/Mashooqa-From-Cocktail-2-Hindi-2026-20260519130936-500x500.jpg',
   dhurandhar: 'https://c.saavncdn.com/581/Dhurandhar-The-Revenge-Hindi-2026-20260409161002-500x500.jpg',

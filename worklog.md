@@ -434,3 +434,65 @@ Stage Summary:
 - First launch on a FRESH INSTALL (or after clearing app data) now shows: What's-new → "What's your name?" → circular artist picker (search + More Bollywood) → genre tiles → Home with "Made for {name}"
 - Note: existing installs that already completed the old Pick-5 will NOT see onboarding again (onboardingDone persisted) — clear app data to re-experience
 - Reminder: user rotates GitHub token after session
+
+---
+Task ID: 6 (session 2026-08-29, part 5)
+Agent: Super Z (main agent)
+Task: v3.2.0 — user feedback round: REAL artist photos in onboarding + persistence fix + deep Home + search polish + new icon (user: "artist picker shows song art... app asks again after restart... home too small... icon awful... use the gauntlet loop, don't compress the workflow")
+
+Work Log:
+- ROOT CAUSE of the re-ask bug: Onboarding's gate read mindbeat.kvGet('onboardingDone') on mount
+  WITHOUT awaiting mindbeat.ready() — on cold device start the SQLite store isn't open yet →
+  store null → kvGet returns null → onboarding re-showed despite the flag being written.
+  Fix (end-to-end): gate awaits ready() (4s race cap) + dual-source flag (kv OR plain
+  AsyncStorage 'tsf.onboardingDone'); finish() writes AsyncStorage FIRST (durable before close);
+  progress checkpoint (tsf.onboardingProgress) so a mid-flow kill RESUMES instead of restarting;
+  name also dual-written (tsf.userName) + Home greeting never clears a known-good name.
+  Lab-verified: reload-after-finish → onboarding stays gone, "Made for Rahul" renders (both devices).
+- REAL ARTIST PHOTOS: JioSaavn artist SEARCH returns placeholders, but
+  song-search more_info.artistMap.primary_artists[0].image + artist.getArtistPageDetails
+  return genuine portraits (verified live; 500x500 upgrade works).
+  NEW src/api/artists.ts: ARTIST_SEEDS (48 A-listers w/ verified photo URLs, harvested live),
+  ARTIST_CATEGORIES (8 live-pool queries), searchSaavnArtists(), getArtistPhoto(id) cached,
+  lookupArtistPhoto(name); sanitizeArtistImage() rejects placeholders/album-art masquerading
+  (only /artists/ CDN paths pass); initials fallback added to Artwork (photo-less artists get
+  elegant initials circles, never wrong album art).
+- Onboarding v3.2 pool: 15 curated tiles on screen one → "More artists" (instant seed chunks,
+  48 total) → "More {Bollywood|Punjabi|Hip-Hop|Romance|Indie|Sufi|Retro|Pop}" live batches
+  (~12 each, deduped) — effectively unbounded; artist search w/ real photos + id-based photo
+  enrichment; genuine-Spotify dimming of unselected tiles once a pick exists (critic-driven).
+- HOME DEPTH: content.getHomepageData powers NEW "New releases" (album kind, wired through
+  CollectionScreen→getAlbumTracks) + "Featured playlists" shelves (30+30 editorial items,
+  6h-cached in AsyncStorage for instant cold starts); NEW "Popular artists" rail (10 circular
+  REAL-photo cards: profile top artists → onboarding seeds → curated fill; ≤6 live photo
+  lookups); shelf order now: shortcuts → Made for {name} → Now Sound → Jump back in →
+  Popular artists → Trending → On the Rise → Because you listened → New releases →
+  Featured playlists → charts → footer divider. Lab: 3 deep-scroll captures + editorial
+  shelves x3 + artist rail x10 verified.
+- SEARCH: Top-result hero card (art, Song chip, artist, green play FAB) over a "Songs" list;
+  Browse grid 12→18 curated categories; clear-recents button.
+- ICON (10 gauntlet rounds vs fetched genuine refs, binary gates): glow/depth variants failed
+  (muddy), flat-green disc FAILED as Spotify clone, squircle+equalizer PASSED, final =
+  distinct ownable mark — stylized music note built FROM waveform bars (green note + white
+  sound bars on dark premium tile). Installed: icon.png (full-bleed 1024), adaptive-icon.png
+  (transparent safe zone), splash.png (+Figtree-800 wordmark), favicon. 48px legibility verified.
+- Device lab REBUILT from scratch (was never committed): scripts/device_lab.py (Playwright,
+  hardware-faithful Pixel 7 + iPhone 13 viewports; 28-step walkthrough incl. the PERSISTENCE
+  reload regression, More-tile expansion 15→30, artist-search proof, 3-depth home scroll,
+  top-result search, player, tabs) + scripts/lab.sh (metro orchestrator). 28/28 green,
+  0 console errors, both devices.
+- UI gauntlet vs genuine refs (VLM critics, fresh context): onboarding WIN (real distinct
+  photos confirmed, ring/check/typography match) + dim fix applied (pixel-verified ~50%
+  brightness delta); home WIN ("populated and rich, not a hollow wireframe").
+- WhatsNew bumped to v3.2.0 notes (new SEEN key → upgraders see it); tabBarTestIDs added.
+- Gates: tsc clean; bun test 74/74; hbc 3.15MB with all 17 v3.2 markers (incl.
+  Arijit_Singh photo seed, tsf.onboardingDone, tsf.onboardingProgress, content.getHomepageData,
+  Popular artists, Top result); webmocks NOT leaked; app.json → 3.2.0.
+- Packaged download/tsf-ui-screenshots/ fresh (19 states × 2 devices + side-by-side + gallery).
+
+Stage Summary:
+- v3.2.0 ships every user-reported fix end-to-end: real artist photos everywhere (48 verified
+  portraits + live pipeline + honest initials), onboarding never re-asks (dual durable write +
+  resume), Home scrolls Spotify-deep (editorial feed + artist rail), search gets Top result +
+  18-category browse, brand-new gauntlet-verified icon/splash.
+- Release: tag v3.2.0 pending push → CI APK (reminder: user rotates GitHub token after session)

@@ -19,7 +19,7 @@ const BROWSER_HEADERS: Record<string, string> = {
   Accept: 'application/json, text/plain, */*',
 };
 
-async function saavnGet(params: Record<string, string>): Promise<any> {
+export async function saavnGet(params: Record<string, string>): Promise<any> {
   const qs = new URLSearchParams({
     _format: 'json',
     _marker: '0',
@@ -172,6 +172,46 @@ export async function getCharts(): Promise<Collection[]> {
     trackCount: c.count ?? undefined,
     kind: 'chart' as const,
   }));
+}
+
+/**
+ * Editorial home feed (v3.2) — JioSaavn's own homepage modules: fresh
+ * albums + featured playlists. This is what makes Home scroll DEEP like
+ * Spotify instead of 2-3 rows: 30 new releases + 30 curated playlists,
+ * every one a real openable collection with artwork.
+ */
+export interface HomepageFeed {
+  newAlbums: Collection[];
+  featured: Collection[];
+}
+
+let feedMemo: HomepageFeed | null = null;
+
+export async function getHomepageFeed(): Promise<HomepageFeed> {
+  if (feedMemo) return feedMemo;
+  const data = await saavnGet({ __call: 'content.getHomepageData' });
+  const mapAlbum = (a: any): Collection => ({
+    id: String(a?.id ?? ''),
+    title: decodeEntities(a?.title ?? ''),
+    subtitle: a?.subtitle ?? a?.more_info?.music ?? 'Album',
+    artwork: art500(a?.image),
+    trackCount: a?.more_info?.song_count ?? undefined,
+    kind: 'album' as const,
+  });
+  const mapPlaylist = (p: any): Collection => ({
+    id: String(p?.listid ?? p?.id ?? ''),
+    title: decodeEntities(p?.title ?? ''),
+    subtitle: p?.subtitle ?? 'Playlist',
+    artwork: art500(p?.image),
+    trackCount: p?.count ?? undefined,
+    kind: 'chart' as const,
+  });
+  const feed: HomepageFeed = {
+    newAlbums: (Array.isArray(data?.new_albums) ? data.new_albums : []).map(mapAlbum).filter((c: Collection) => c.id && c.title),
+    featured: (Array.isArray(data?.featured_playlists) ? data.featured_playlists : []).map(mapPlaylist).filter((c: Collection) => c.id && c.title),
+  };
+  feedMemo = feed;
+  return feed;
 }
 
 export async function getCollectionTracks(collectionId: string): Promise<Track[]> {
