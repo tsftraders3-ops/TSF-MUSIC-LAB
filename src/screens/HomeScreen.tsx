@@ -62,6 +62,7 @@ export function HomeScreen() {
   const [onTheRise, setOnTheRise] = useState<OnTheRiseCard | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [offline, setOffline] = useState(false);
+  const [userName, setUserName] = useState('');
 
   const play = useCallback(
     (tracks: Track[], index: number) => {
@@ -134,6 +135,22 @@ export function HomeScreen() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // First name → "Made for {name}" (desktop-Spotify behaviour; falls back to
+  // "Made for you" when unset). The profile-change subscription covers the
+  // exact moment onboarding completes (seeding triggers a rebuild).
+  useEffect(() => {
+    mindbeat
+      .kvGet<string>('userName')
+      .then((n) => n && setUserName(n))
+      .catch(() => undefined);
+    return mindbeat.onProfile(() => {
+      mindbeat
+        .kvGet<string>('userName')
+        .then((n) => setUserName(n ?? ''))
+        .catch(() => undefined);
+    });
+  }, []);
 
   const hasMixes = !!mixes && mixes.length > 0;
   const loading = mixes === null && trending === null;
@@ -282,9 +299,9 @@ export function HomeScreen() {
               </Shelf>
             ) : null}
 
-            {/* ── Made for you (AI Daily Mixes) ───────────────────────── */}
+            {/* ── Made for you / Made for {name} (AI Daily Mixes) ────── */}
             {hasMixes && showAI ? (
-              <Shelf title="Made for you">
+              <Shelf title={userName ? `Made for ${userName}` : 'Made for you'}>
                 {mixes!.map((mix) => (
                   <ShelfCard
                     key={mix.id}

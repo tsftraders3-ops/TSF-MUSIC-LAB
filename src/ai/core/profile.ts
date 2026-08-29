@@ -45,6 +45,8 @@ export interface BuildOptions {
   now: number;
   /** Onboarding Pick-5 seeds (artist names), weight 3.0 each (§6.7). */
   onboardingSeeds?: string[];
+  /** Onboarding genre picks — softer affinity hints (§6.7). */
+  onboardingGenres?: string[];
   /** When the seeds were first picked (decay anchor). */
   onboardingSeedTs?: number;
   /** Carried-over explicit corrections (boost/mute/wrong). */
@@ -164,6 +166,10 @@ export function buildProfile(
   for (const artist of opts.onboardingSeeds ?? []) {
     const key = normalizeArtist(artist);
     if (key) bump(p.artists, key, ONBOARDING.seedWeight, seedTs, 'onboarding');
+  }
+  for (const genre of opts.onboardingGenres ?? []) {
+    const key = normalizeArtist(genre);
+    if (key) bump(p.genres, key, ONBOARDING.genreSeedWeight, seedTs, 'onboarding');
   }
 
   // Heart / download / not-for-me discrete events.

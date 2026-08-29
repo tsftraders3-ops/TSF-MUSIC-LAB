@@ -1,0 +1,618 @@
+/**
+ * Onboarding (§9.9) — Spotify-faithful first run (R2, gauntlet-corrected).
+ *
+ * Step 1  "What's your name?"        — signup-style name capture
+ * Step 2  "Choose 3 or more artists you like." — centered title, squircle
+ *         search, 3-column CIRCLES, white ring + white/black check badge
+ *         (pixel-verified vs genuine refs), "More {category}" magenta tile
+ * Step 3  "What kind of music do you like?" — colorful genre tiles w/
+ *         contrast scrim (WCAG-large) + rotated palette
+ *
+ * Gauntlet R1 findings baked in: no count FAB (genuine has none — count
+ * lives in the CTA), green pill CTA w/ black label on every step, white
+ * logo mark, safe-area aware on both platforms, autoFocus name field.
+ *
+ * Feeds MINDBEAT instantly: artists → weight 3.0 seeds, genres → weight 2.2
+ * affinity hints (§6.7). Shown once; steps 2–3 are skippable.
+ */
+
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { searchSaavnClean } from '../api/saavn';
+import { mindbeat } from '../ai/mindbeat';
+import { Artwork } from './Artwork';
+import { PressableScale } from './PressableScale';
+import { colors, fonts } from '../theme';
+
+/**
+ * Genre tiles — keys match GENRE_PRIORS so affinity lines up exactly.
+ * Palette rotated for pairwise separability (R1: ΔRGB<60 pairs) and
+ * bottom-scrimmed for WCAG-large label contrast.
+ */
+const GENRES: Array<{ key: string; label: string; icon: keyof typeof Ionicons.glyphMap; from: string; to: string }> = [
+  { key: 'bollywood', label: 'Bollywood', icon: 'film', from: '#e13300', to: '#ff8a00' },
+  { key: 'punjabi', label: 'Punjabi', icon: 'musical-notes', from: '#ca8a04', to: '#facc15' },
+  { key: 'indie', label: 'Indie', icon: 'leaf', from: '#158a56', to: '#1ed760' },
+  { key: 'rap', label: 'Hip-Hop', icon: 'mic', from: '#6d28d9', to: '#a21caf' },
+  { key: 'pop', label: 'Pop', icon: 'sparkles', from: '#db2777', to: '#f472b6' },
+  { key: 'sufi', label: 'Sufi & Qawwali', icon: 'infinite', from: '#1e1b4b', to: '#4338ca' },
+  { key: 'retro', label: 'Retro', icon: 'time', from: '#7c2d12', to: '#a16207' },
+  { key: 'romantic', label: 'Romantic', icon: 'heart', from: '#e11d48', to: '#fb7185' },
+  { key: 'lofi', label: 'Lofi & Chill', icon: 'headset', from: '#0f172a', to: '#475569' },
+  { key: 'workout', label: 'Workout', icon: 'barbell', from: '#b91c1c', to: '#ef4444' },
+  { key: 'ghazal', label: 'Ghazal', icon: 'book', from: '#4c1d95', to: '#7c3aed' },
+  { key: 'devotional', label: 'Devotional', icon: 'flower', from: '#c2410c', to: '#fb923c' },
+];
+
+/** Catalog categories. The picker starts on Bollywood; other languages are
+ *  reachable via search (genuine behaviour) — no chip row. */
+const CATEGORY = { key: 'hindi', label: 'Bollywood', primary: 'top hindi hits', more: 'best bollywood songs' };
+
+const MIN_ARTISTS = 3;
+const MAX_ARTISTS = 12;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Mirrors WhatsNewDialog's dismissal flag (plain AsyncStorage — independent
+ *  of mindbeat's namespaced store so the gate works even pre-boot). */
+const whatsNewDismissed = async (): Promise<boolean> => {
+  try {
+    return (await AsyncStorage.getItem('tsf.whatsNewDismissed')) != null;
+  } catch {
+    return true; // storage unavailable → don't trap the user
+  }
+};
+
+/** Primary artist: strip feats AND comma features ("Pritam, Shilpa Rao"). */
+const primaryArtist = (raw: string): string => {
+  const a = raw
+    .split(' feat')[0]!
+    .split(',')[0]!
+    .trim();
+  return a && a !== 'Unknown artist' ? a : '';
+};
+
+interface ArtistTile {
+  name: string;
+  artwork?: string;
+}
+
+type Step = 'name' | 'artists' | 'genres';
+
+export function Onboarding({ onDone }: { onDone: () => void }) {
+  const [visible, setVisible] = useState(false);
+  const [step, setStep] = useState<Step>('name');
+
+  // collected answers
+  const [name, setName] = useState('');
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [genres, setGenres] = useState<Set<string>>(new Set());
+
+  // artist catalog state
+  const [pool, setPool] = useState<ArtistTile[] | null>(null);
+  const [morePool, setMorePool] = useState<ArtistTile[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [query, setQuery] = useState('');
+  const [nameFocus, setNameFocus] = useState(false);
+  const nameInput = useRef<TextInput>(null);
+
+  const { width: winW } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const done = await mindbeat.kvGet<boolean>('onboardingDone');
+      if (done || cancelled) return;
+      // Fresh installs also show the What's-new dialog. As the LATER modal we
+      // would stack on top of it — wait until it is dismissed (600ms polls,
+      // 30s cap).
+      if (!(await whatsNewDismissed())) {
+        for (let i = 0; i < 50 && !cancelled; i++) {
+          await sleep(600);
+          if (await whatsNewDismissed()) break;
+        }
+      }
+      if (!cancelled) setVisible(true);
+    })().catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const extractArtists = (tracks: Awaited<ReturnType<typeof searchSaavnClean>>, existing: Set<string>, cap: number) => {
+    const artists: ArtistTile[] = [];
+    for (const t of tracks) {
+      const a = primaryArtist(t.artist);
+      const k = a.toLowerCase();
+      if (a && !existing.has(k) && !artists.some((x) => x.name.toLowerCase() === k)) {
+        artists.push({ name: a, artwork: t.artwork });
+      }
+      if (artists.length >= cap) break;
+    }
+    return artists;
+  };
+
+  // Load the base pool once when the artists step first shows.
+  useEffect(() => {
+    if (step !== 'artists' || pool) return;
+    (async () => {
+      try {
+        const tracks = await searchSaavnClean(CATEGORY.primary, 40);
+        const seen = new Set<string>();
+        // 15 base tiles → the "More {category}" circle lands on the first
+        // screen (genuine ref), the rest arrive via the More tile.
+        setPool(extractArtists(tracks, seen, 15));
+      } catch {
+        setPool([]);
+      }
+    })();
+  }, [step, pool]);
+
+  const doSearch = async () => {
+    const q = query.trim();
+    if (!q || pool === null) return;
+    try {
+      const tracks = await searchSaavnClean(q, 40);
+      const existing = new Set<string>();
+      const found = extractArtists(tracks, existing, 40);
+      setPool(found.length ? found : []);
+    } catch {
+      /* keep current pool */
+    }
+  };
+
+  /** Spotify's "More {category}" tile — expands the grid with a second query. */
+  const loadMore = async () => {
+    if (morePool.length || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const tracks = await searchSaavnClean(CATEGORY.more, 40);
+      const existing = new Set([...(pool ?? []).map((a) => a.name.toLowerCase()), ...morePool.map((a) => a.name.toLowerCase())]);
+      setMorePool(extractArtists(tracks, existing, 12));
+    } catch {
+      setMorePool([]);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const toggleArtist = (artist: string) => {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(artist)) next.delete(artist);
+      else if (next.size < MAX_ARTISTS) next.add(artist);
+      return next;
+    });
+  };
+
+  const toggleGenre = (key: string) => {
+    setGenres((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  /** Finish — persist everything collected, seed the engine, close. */
+  const finish = async () => {
+    const cleanName = name.trim().slice(0, 24);
+    try {
+      if (cleanName) await mindbeat.kvSet('userName', cleanName);
+      await mindbeat.setOnboardingSeeds([...picked], [...genres]);
+      await mindbeat.kvSet('onboardingDone', true);
+    } catch {
+      /* best-effort — never trap the user in onboarding */
+    }
+    setVisible(false);
+    onDone();
+  };
+
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const all = [...(pool ?? []), ...morePool];
+    if (!q) return all;
+    const seen = new Set<string>();
+    return all.filter((a) => {
+      if (a.name.toLowerCase().includes(q) && !seen.has(a.name.toLowerCase())) {
+        seen.add(a.name.toLowerCase());
+        return true;
+      }
+      return false;
+    });
+  }, [pool, morePool, query]);
+
+  if (!visible) return null;
+
+  const tileW = Math.floor((winW - 32 - 20) / 3);
+  const artistsReady = picked.size >= MIN_ARTISTS;
+  const ctaLabel =
+    step === 'artists'
+      ? picked.size === 0
+        ? `Choose ${MIN_ARTISTS} artists`
+        : picked.size < MIN_ARTISTS
+          ? `Choose ${MIN_ARTISTS - picked.size} more`
+          : 'Continue'
+      : genres.size === 0
+        ? 'Pick at least one'
+        : 'Continue';
+  const ctaDisabled = step === 'artists' ? !artistsReady : genres.size === 0;
+
+  return (
+    <Modal visible transparent={false} animationType="fade" onRequestClose={() => undefined}>
+      <View style={[styles.screen, { paddingTop: insets.top }]}>
+        {step === 'name' ? (
+          <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View style={styles.nameWrap}>
+              {/* Genuine signup mark: white circle, dark wave */}
+              <View style={styles.logo}>
+                <View style={{ width: 22, height: 3.4, borderRadius: 9, backgroundColor: '#121212' }} />
+                <View style={{ width: 16, height: 3.4, borderRadius: 9, backgroundColor: '#121212' }} />
+                <View style={{ width: 10, height: 3.4, borderRadius: 9, backgroundColor: '#121212' }} />
+              </View>
+              <Text style={styles.bigTitle}>What&apos;s your name?</Text>
+              <Text style={styles.sub}>Your name shapes your mixes, stats and AI picks.</Text>
+              <View style={[styles.inputWrap, nameFocus && styles.inputWrapFocus]}>
+                <TextInput
+                  testID="onb-name-input"
+                  ref={nameInput}
+                  autoFocus
+                  style={styles.input as never}
+                  placeholder="Your name"
+                  placeholderTextColor={colors.textDim}
+                  value={name}
+                  onChangeText={setName}
+                  maxLength={24}
+                  returnKeyType="done"
+                  onSubmitEditing={() => name.trim() && setStep('artists')}
+                  onFocus={() => setNameFocus(true)}
+                  onBlur={() => setNameFocus(false)}
+                  selectionColor={colors.accentBright}
+                />
+              </View>
+            </View>
+            {/* Same bottom-anchored footer pattern as the other steps
+             * (signup ref: full-width green pill, ~90% screen width). */}
+            <View style={[styles.footer, { paddingBottom: Math.max(24, insets.bottom + 8) }]}>
+              <PressableScale
+                testID="onb-continue"
+                haptic
+                disabled={!name.trim()}
+                onPress={() => setStep('artists')}
+                style={name.trim() ? styles.cta : styles.ctaDim}
+              >
+                <Text style={styles.ctaText}>Continue</Text>
+              </PressableScale>
+            </View>
+          </KeyboardAvoidingView>
+        ) : step === 'artists' ? (
+          <View style={styles.flex}>
+            <View style={styles.topBar}>
+              <PressableScale haptic onPress={() => setStep('name')} style={styles.backBtn} hitSlop={12} accessibilityLabel="Back">
+                <Ionicons name="chevron-back" size={26} color={colors.text} />
+              </PressableScale>
+            </View>
+            <Text style={styles.stepTitle}>Choose 3 or more artists you like.</Text>
+            <View style={styles.searchWrap}>
+              <Ionicons name="search" size={18} color={colors.textDim} />
+              <TextInput
+                testID="onb-search"
+                style={styles.searchInput as never}
+                placeholder="Search"
+                placeholderTextColor={colors.textDim}
+                value={query}
+                onChangeText={setQuery}
+                returnKeyType="search"
+                onSubmitEditing={doSearch}
+                selectionColor={colors.accentBright}
+              />
+            </View>
+            <ScrollView contentContainerStyle={styles.gridPad} showsVerticalScrollIndicator={false}>
+              {pool === null ? (
+                <View style={styles.loadingWrap}>
+                  <ActivityIndicator color={colors.accentBright} />
+                </View>
+              ) : (
+                <View style={styles.grid}>
+                  {shown.map((a) => {
+                    const on = picked.has(a.name);
+                    return (
+                      <PressableScale
+                        key={a.name}
+                        testID="onb-artist"
+                        haptic
+                        onPress={() => toggleArtist(a.name)}
+                        accessibilityState={{ selected: on }}
+                        style={[styles.artistCell, { width: tileW }]}
+                      >
+                        <View style={styles.artWrap}>
+                          {/* Genuine picker: circular avatar; selected =
+                           * white ring flush on the photo edge + white
+                           * badge w/ black check at the top-right. */}
+                          <Artwork uri={a.artwork} seed={a.name} size={tileW} variant="circle" />
+                          {on ? (
+                            <>
+                              <View style={styles.ring} />
+                              <View style={styles.checkBadge}>
+                                <Ionicons name="checkmark" size={14} color="#000" />
+                              </View>
+                            </>
+                          ) : null}
+                        </View>
+                        <Text style={styles.artistName} numberOfLines={2}>
+                          {a.name}
+                        </Text>
+                      </PressableScale>
+                    );
+                  })}
+                  {!query.trim() && shown.length > 0 ? (
+                    <PressableScale
+                      testID="onb-more"
+                      haptic
+                      onPress={() => void loadMore()}
+                      accessibilityLabel={`More ${CATEGORY.label}`}
+                      style={[styles.artistCell, { width: tileW }]}
+                    >
+                      {/* Spotify India's "More {category}" magenta circle */}
+                      <View style={[styles.moreCircle, { width: tileW, height: tileW }]}>
+                        {loadingMore ? (
+                          <ActivityIndicator color="#fff" />
+                        ) : (
+                          <Text style={styles.moreText} numberOfLines={2}>
+                            More{'\n'}
+                            {CATEGORY.label}
+                          </Text>
+                        )}
+                      </View>
+                      <Text style={styles.artistName} numberOfLines={2}>
+                        {' '}
+                      </Text>
+                    </PressableScale>
+                  ) : null}
+                </View>
+              )}
+            </ScrollView>
+            <View style={[styles.footer, { paddingBottom: Math.max(24, insets.bottom + 8) }]}>
+              <PressableScale
+                testID="onb-continue"
+                haptic
+                disabled={!artistsReady}
+                onPress={() => setStep('genres')}
+                style={artistsReady ? styles.cta : styles.ctaDim}
+              >
+                <Text style={styles.ctaText}>{ctaLabel}</Text>
+              </PressableScale>
+              <PressableScale haptic onPress={() => setStep('genres')} style={styles.skip} hitSlop={12}>
+                <Text style={styles.skipText}>Skip</Text>
+              </PressableScale>
+            </View>
+          </View>
+        ) : (
+          <View style={styles.flex}>
+            <View style={styles.topBar}>
+              <PressableScale haptic onPress={() => setStep('artists')} style={styles.backBtn} hitSlop={12} accessibilityLabel="Back">
+                <Ionicons name="chevron-back" size={26} color={colors.text} />
+              </PressableScale>
+            </View>
+            <Text style={styles.stepTitle}>What kind of music do you like?</Text>
+            <ScrollView contentContainerStyle={styles.gridPad} showsVerticalScrollIndicator={false}>
+              <View style={styles.genreGrid}>
+                {GENRES.map((g) => {
+                  const on = genres.has(g.key);
+                  return (
+                    <PressableScale
+                      key={g.key}
+                      testID="onb-genre"
+                      haptic
+                      onPress={() => toggleGenre(g.key)}
+                      accessibilityState={{ selected: on }}
+                      style={[styles.genreTile, { width: (winW - 32 - 12) / 2 }, on && styles.genreTileOn]}
+                    >
+                      <LinearGradient
+                        colors={[g.from, g.to]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={StyleSheet.absoluteFill}
+                      />
+                      {/* contrast scrim under the label (R1: 10/12 failed 3:1) */}
+                      <LinearGradient
+                        colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.55)']}
+                        start={{ x: 0, y: 0.25 }}
+                        end={{ x: 0, y: 1 }}
+                        style={StyleSheet.absoluteFill}
+                      />
+                      <Text style={styles.genreLabel}>{g.label}</Text>
+                      <View style={styles.genreIcon}>
+                        <Ionicons name={g.icon} size={38} color="rgba(255,255,255,0.9)" />
+                      </View>
+                      {on ? (
+                        <View style={styles.genreCheck}>
+                          <Ionicons name="checkmark" size={14} color="#000" />
+                        </View>
+                      ) : null}
+                    </PressableScale>
+                  );
+                })}
+              </View>
+            </ScrollView>
+            <View style={[styles.footer, { paddingBottom: Math.max(24, insets.bottom + 8) }]}>
+              <PressableScale
+                testID="onb-continue"
+                haptic
+                disabled={ctaDisabled}
+                onPress={() => void finish()}
+                style={ctaDisabled ? styles.ctaDim : styles.cta}
+              >
+                <Text style={styles.ctaText}>{ctaLabel}</Text>
+              </PressableScale>
+              <PressableScale haptic onPress={() => void finish()} style={styles.skip} hitSlop={12}>
+                <Text style={styles.skipText}>Skip</Text>
+              </PressableScale>
+            </View>
+          </View>
+        )}
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: colors.bg },
+  flex: { flex: 1 },
+  // — step: name —
+  nameWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, gap: 12 },
+  logo: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    marginBottom: 10,
+  },
+  bigTitle: { color: colors.text, fontSize: 24, fontWeight: '900', fontFamily: fonts.black, textAlign: 'center' },
+  sub: { color: colors.textDim, fontSize: 13, fontFamily: fonts.regular, textAlign: 'center', lineHeight: 18 },
+  inputWrap: {
+    width: '100%',
+    backgroundColor: '#242424',
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#242424',
+    marginTop: 10,
+  },
+  inputWrapFocus: { borderColor: '#ffffff' },
+  input: {
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: colors.text,
+    fontSize: 16,
+    fontFamily: fonts.medium,
+    outlineWidth: 0,
+  } as never,
+  // — shared chrome —
+  topBar: { height: 52, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10 },
+  backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  stepTitle: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: '900',
+    fontFamily: fonts.black,
+    textAlign: 'center',
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+  },
+  footer: { padding: 16, gap: 10, backgroundColor: colors.bg },
+  cta: {
+    backgroundColor: colors.accentBright,
+    borderRadius: 999,
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  ctaDim: {
+    backgroundColor: '#169C46', // muted green (R2: opacity-dim read muddy)
+    borderRadius: 999,
+    paddingVertical: 15,
+    alignItems: 'center',
+  },
+  ctaText: { color: colors.textOnGreen, fontSize: 15.5, fontWeight: '800', fontFamily: fonts.extrabold },
+  skip: { alignItems: 'center', paddingVertical: 8 },
+  skipText: { color: colors.textDim, fontSize: 13.5, fontFamily: fonts.medium },
+  // — step: artists —
+  searchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#282828',
+    borderRadius: 8,
+    marginHorizontal: 16,
+    paddingHorizontal: 14,
+    height: 44,
+  },
+  searchInput: { flex: 1, color: colors.text, fontSize: 14.5, fontFamily: fonts.medium, outlineWidth: 0 } as never,
+  loadingWrap: { paddingVertical: 60, alignItems: 'center' },
+  gridPad: { padding: 16, paddingBottom: 150 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  artistCell: { alignItems: 'center' },
+  artWrap: { position: 'relative' },
+  ring: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: '#ffffff',
+  },
+  checkBadge: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+  },
+  artistName: {
+    color: colors.text,
+    fontSize: 13,
+    fontFamily: fonts.medium,
+    textAlign: 'center',
+    marginTop: 7,
+    height: 34,
+  },
+  moreCircle: {
+    borderRadius: 999,
+    backgroundColor: '#e91e63',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 10,
+  },
+  moreText: {
+    color: '#fff',
+    fontSize: 13.5,
+    fontWeight: '800',
+    fontFamily: fonts.extrabold,
+    textAlign: 'center',
+    lineHeight: 17,
+  },
+  // — step: genres —
+  genreGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  genreTile: {
+    aspectRatio: 1.75,
+    borderRadius: 10,
+    overflow: 'hidden',
+    padding: 12,
+    justifyContent: 'flex-end',
+  },
+  genreTileOn: { borderWidth: 2, borderColor: '#ffffff' },
+  genreLabel: { color: '#fff', fontSize: 15.5, fontWeight: '900', fontFamily: fonts.black },
+  genreIcon: { position: 'absolute', top: 8, right: 10, opacity: 0.92 },
+  genreCheck: {
+    position: 'absolute',
+    top: 8,
+    right: 10,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

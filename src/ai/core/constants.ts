@@ -161,6 +161,7 @@ export const STREAM_COUNT_SECONDS = 30;
 export const ONBOARDING = {
   pickCount: 5,
   seedWeight: 3.0, // ≈ 6h of listening equivalent
+  genreSeedWeight: 2.2, // softer than artists — taste hints, not anchors
   firstSessionsExplore: 5, // sessions 1–5 run exploration-heavy
 } as const;
 

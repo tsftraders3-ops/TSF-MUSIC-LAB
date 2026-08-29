@@ -22,7 +22,7 @@ import { TasteScreen } from './src/screens/TasteScreen';
 import { PlayerScreen } from './src/screens/PlayerScreen';
 import { DynamicThemeProvider } from './src/theme/DynamicThemeProvider';
 import { WhatsNewDialog } from './src/components/WhatsNewDialog';
-import { OnboardingPick5 } from './src/components/OnboardingPick5';
+import { Onboarding } from './src/components/Onboarding';
 import type { RootStackParamList, TabParamList } from './src/screens/navigation';
 import { colors } from './src/theme';
 
@@ -155,7 +155,7 @@ export default function App() {
             <NavigationContainer theme={navTheme}>
               <StatusBar style="light" backgroundColor={colors.bg} />
               <WhatsNewDialog />
-              <OnboardingPick5 onDone={() => undefined} />
+              <Onboarding onDone={() => undefined} />
               <Stack.Navigator
                 screenOptions={{
                   headerShown: false,

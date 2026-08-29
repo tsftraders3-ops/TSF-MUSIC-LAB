@@ -106,10 +106,12 @@ class Mindbeat {
       const favorites = await getFavorites().catch(() => [] as Track[]);
       const seeds = (await this.kvGet<string[]>('onboardingSeeds')) ?? [];
       const seedTs = (await this.kvGet<number>('onboardingSeedTs')) ?? Date.now();
+      const seedGenres = (await this.kvGet<string[]>('onboardingGenres')) ?? [];
       const priorCorrections = this.profile?.corrections;
       const profile = buildProfile(listens, events, sessions, {
         now: Date.now(),
         onboardingSeeds: seeds,
+        onboardingGenres: seedGenres,
         onboardingSeedTs: seedTs,
         corrections: priorCorrections,
       });
@@ -265,8 +267,9 @@ class Mindbeat {
     this.listeners.forEach((fn) => fn(this.profile));
   }
 
-  async setOnboardingSeeds(artists: string[]): Promise<void> {
+  async setOnboardingSeeds(artists: string[], genres: string[] = []): Promise<void> {
     await this.kvSet('onboardingSeeds', artists);
+    await this.kvSet('onboardingGenres', genres);
     await this.kvSet('onboardingSeedTs', Date.now());
     await this.rebuildProfile();
   }
@@ -287,6 +290,7 @@ class Mindbeat {
   /** Reset the whole taste model (one button, §6.6). */
   async resetProfile(): Promise<void> {
     await this.kvSet('onboardingSeeds', []);
+    await this.kvSet('onboardingGenres', []);
     await this.kvSet('onboardingSeedTs', Date.now());
     await this.kvSet('corrections', { mutedArtists: [], mutedTracks: [], boosts: {}, wrongLabels: [] });
     this.profile = emptyProfile(Date.now());

@@ -11,14 +11,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { PressableScale } from './PressableScale';
 import { colors, fonts, radius, spacing } from '../theme';
 
-const SEEN_KEY = 'tsf.whatsNew.v3_0_0';
+const SEEN_KEY = 'tsf.whatsNew.v3_1_0';
+/** Set on every close — Onboarding polls it before showing (see Onboarding.tsx). */
+const WHATSNEW_DISMISSED_KEY = 'tsf.whatsNewDismissed';
 
 const CHANGES = [
-  'MINDBEAT AI engine: the app now learns from every play, skip and like',
-  'Smart Shuffle gets queue healing — skip a pick, it instantly adapts',
-  'TSF AI v2: understands Hinglish, negations (“no remixes”) and energy arcs',
-  'New: Now Sound (music for your exact hour), On the Rise, Taste DNA',
-  'Your Sound: 30-second-rule streams, listening clock, day streaks',
+  'New first-run setup: tell us your name, pick artists, choose genres',
+  'Your picks instantly train radio, Daily Mixes and Smart Shuffle',
+  'Home now says “Made for you” — with your name',
 ];
 
 export function WhatsNewDialog() {
@@ -36,7 +36,12 @@ export function WhatsNewDialog() {
       .catch(() => undefined);
   }, []);
 
-  const close = () => setVisible(false);
+  const close = () => {
+    setVisible(false);
+    // Signal for the Onboarding gate — it waits for the dialog to be
+    // dismissed before taking over the screen (fresh installs see both).
+    AsyncStorage.setItem(WHATSNEW_DISMISSED_KEY, String(Date.now())).catch(() => undefined);
+  };
 
   return (
     <Modal
