@@ -24,6 +24,21 @@
 import type { Track } from '../types';
 
 // ── client registry (ONE place to update when YouTube rotates shapes) ──
+// Refreshed 2026-02 against the OSS playback ecosystem (yt-dlp PO-Token-Guide
+// Jul-2026 edition, NewPipeExtractor dev ClientsConstants, Metrolist
+// innertubex PlaybackClientCatalog benchmarks):
+//
+//   VISIONOS     1.04  — tokenless, PRE-SIGNED plain URLs, no decipher.
+//                       The production client for NewPipe + yt-dlp default.
+//                       Works from residential IPs; bot-walled from DCs.
+//   WEB_REMIX    current — needs a BotGuard PO token (player+GVS) AND
+//                       signatureCipher deciphering — served by the hidden
+//                       WebView minter (ytPoToken.ts) when mounted.
+//   ANDROID_VR   1.65.10 — tokenless plain URLs but dying (selective 403s
+//                       since 2026.07); kept as a free last rung.
+//
+// The old IOS/ANDROID 19.09 rungs are DEAD (HTTP 400 version rejection) and
+// TVHTML5_SIMPLY_EMBEDDED_PLAYER 2.0 is retired ("no longer supported").
 
 interface YtClient {
   name: string;
@@ -33,46 +48,52 @@ interface YtClient {
   userAgent: string;
   extraContext?: Record<string, unknown>;
   headers?: Record<string, string>;
+  /** needs a BotGuard PO token from the WebView minter before firing */
+  needsPoToken?: boolean;
+  /** requests go to music.youtube.com (WEB_REMIX origin rules) */
+  musicOrigin?: boolean;
 }
 
 const YT_CLIENTS: YtClient[] = [
   {
-    name: 'IOS',
-    clientName: 'IOS',
-    clientVersion: '19.09.3',
-    apiKey: 'AIzaSyB-63vPrdThhKuerbB2N_l7Kwwcxj6yUAc',
-    userAgent: 'com.google.ios.youtube/19.09.3 (iPhone14,3; U; CPU iOS 15_6 like Mac OS X)',
-    extraContext: { deviceMake: 'Apple', deviceModel: 'iPhone14,3', osName: 'iPhone', osVersion: '15.6.0.19G71' },
-  },
-  {
-    name: 'ANDROID',
-    clientName: 'ANDROID',
-    clientVersion: '19.09.37',
-    apiKey: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
-    userAgent: 'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
-    extraContext: { androidSdkVersion: 30, osName: 'Android', osVersion: '11' },
-  },
-  {
-    name: 'ANDROID_VR',
-    clientName: 'ANDROID_VR',
-    clientVersion: '1.60.19',
-    apiKey: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
-    userAgent: 'com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12; eureka-user Build/SQ3A.220605.009.A1) gzip',
-    extraContext: { deviceMake: 'Oculus', deviceModel: 'Quest 3', osName: 'Android', osVersion: '12', androidSdkVersion: 32 },
+    name: 'VISIONOS',
+    clientName: 'VISIONOS',
+    clientVersion: '1.04',
+    apiKey: '',
+    userAgent:
+      'com.google.visionos.youtube/1.04(RealityDevice17,1; U; CPU visionOS 26_6_0 like Mac OS X; IN)',
+    extraContext: {
+      clientScreen: 'WATCH',
+      deviceMake: 'Apple',
+      deviceModel: 'RealityDevice17,1',
+      osName: 'visionOS',
+      osVersion: '26.6.0.23O770',
+    },
   },
   {
     name: 'WEB_REMIX',
     clientName: 'WEB_REMIX',
-    clientVersion: '1.20240403.01.00',
+    clientVersion: '1.20260707.12.00',
     apiKey: 'AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36',
+    userAgent:
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36',
+    needsPoToken: true,
+    musicOrigin: true,
   },
   {
-    name: 'WEB',
-    clientName: 'WEB',
-    clientVersion: '2.20240701.00.00',
-    apiKey: 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36',
+    name: 'ANDROID_VR',
+    clientName: 'ANDROID_VR',
+    clientVersion: '1.65.10',
+    apiKey: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
+    userAgent:
+      'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+    extraContext: {
+      deviceMake: 'Oculus',
+      deviceModel: 'Quest 3',
+      osName: 'Android',
+      osVersion: '12L',
+      androidSdkVersion: 32,
+    },
   },
 ];
 
@@ -86,10 +107,66 @@ export function setYtFetch(fn: typeof fetch | null): void {
   ytFetch = (fn ?? ((input, init) => fetch(input as any, init as any))) as typeof fetch;
 }
 
-/** Optional PO-token provider (P2 hidden-WebView minter plugs in here). */
-let poTokenProvider: (() => Promise<string | null>) | null = null;
-export function setPoTokenProvider(fn: (() => Promise<string | null>) | null): void {
+/** PO-token provider — the hidden-WebView minter (ytPoToken.ts) plugs in
+ *  here. Returns the SESSION PAIR: the visitorData the challenge was served
+ *  with + the visitor-bound web pot (GVS). A videoId-bound player pot is
+ *  minted per request by the provider itself. */
+export interface YtPoTokenPair {
+  visitorData: string;
+  webPot: string;
+  mintPlayerPot: (videoId: string) => Promise<string | null>;
+}
+let poTokenProvider: (() => Promise<YtPoTokenPair | null>) | null = null;
+export function setPoTokenProvider(fn: (() => Promise<YtPoTokenPair | null>) | null): void {
   poTokenProvider = fn;
+}
+
+// ── session (visitorData bootstrap — the challenge/token pairing anchor) ──
+
+let sessionVisitorData: string | null = null;
+let sessionVisitorAt = 0;
+const SESSION_TTL_MS = 3 * 60 * 60 * 1000; // visitorData lives long; refresh 3h
+
+async function ensureSession(): Promise<string> {
+  const now = Date.now();
+  if (sessionVisitorData && now - sessionVisitorAt < SESSION_TTL_MS) return sessionVisitorData;
+  try {
+    const res = await ytFetch(`${YTI}/visitor_id?prettyPrint=false`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': YT_CLIENTS[0].userAgent,
+        'X-Goog-Api-Format-Version': '2',
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: YT_CLIENTS[0].clientName,
+            clientVersion: YT_CLIENTS[0].clientVersion,
+            hl: HL,
+            gl: GL,
+            ...(YT_CLIENTS[0].extraContext ?? {}),
+          },
+        },
+      }),
+    });
+    const j = await res.json();
+    const v = j?.responseContext?.visitorData ?? '';
+    if (v) {
+      sessionVisitorData = v;
+      sessionVisitorAt = now;
+    }
+  } catch {
+    /* offline — proceed without a visitor; rungs handle it */
+  }
+  return sessionVisitorData ?? '';
+}
+export function peekYtVisitorData(): string {
+  return sessionVisitorData ?? '';
+}
+export function resetYtSession(): void {
+  sessionVisitorData = null;
+  sessionVisitorAt = 0;
 }
 
 // ── kill switch (YT bar 6: breakage can never degrade the core app) ──
@@ -128,31 +205,44 @@ interface PlayerAudio {
 }
 
 async function innertube(endpoint: string, client: YtClient, body: Record<string, unknown>, signal?: AbortSignal): Promise<any> {
+  const visitor = await ensureSession();
   const context: any = {
     client: {
       clientName: client.clientName,
       clientVersion: client.clientVersion,
       hl: HL,
       gl: GL,
+      ...(visitor ? { visitorData: visitor } : {}),
       ...(client.extraContext ?? {}),
     },
   };
-  if (client.name === 'WEB' && poTokenProvider) {
+  if (client.needsPoToken && poTokenProvider) {
     try {
-      const token = await poTokenProvider();
-      if (token) {
-        context.client.poToken = token;
-        (body as any).serviceIntegrityDimensions = { poToken: token };
+      const pair = await poTokenProvider();
+      if (pair) {
+        if (pair.visitorData) context.client.visitorData = pair.visitorData;
+        // the PLAYER pot is videoId-bound (web GVS policy); the session
+        // (visitor-bound) pot covers search/att surfaces
+        const playerPot = body.videoId ? await pair.mintPlayerPot(String(body.videoId)).catch(() => null) : null;
+        const pot = playerPot ?? pair.webPot;
+        if (pot) {
+          context.client.poToken = pot;
+          (body as any).serviceIntegrityDimensions = { poToken: pot };
+        }
       }
     } catch {
       /* token is best-effort — the ladder handles rejection downstream */
     }
   }
-  const res = await ytFetch(`${YTI}/${endpoint}?key=${client.apiKey}&prettyPrint=false`, {
+  const host = client.musicOrigin ? 'https://music.youtube.com/youtubei/v1' : YTI;
+  const keyQ = client.apiKey ? `key=${client.apiKey}&` : '';
+  const res = await ytFetch(`${host}/${endpoint}?${keyQ}prettyPrint=false`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'User-Agent': client.userAgent,
+      'X-Goog-Api-Format-Version': '2',
+      ...(client.musicOrigin ? { Origin: 'https://music.youtube.com', Referer: 'https://music.youtube.com/' } : {}),
       'X-YouTube-Client-Name': clientNameIndex(client.clientName),
       'X-YouTube-Client-Version': client.clientVersion,
       ...(client.headers ?? {}),
@@ -168,7 +258,8 @@ function clientNameIndex(name: string): string {
   // InnerTube's X-YouTube-Client-Name numeric ids (youtubei.js reference)
   const map: Record<string, string> = {
     WEB: '1', MWEB: '2', ANDROID: '3', IOS: '5', TVHTML5: '7',
-    WEB_REMIX: '67', ANDROID_VR: '63', ANDROID_TESTSUITE: '30',
+    WEB_REMIX: '67', ANDROID_VR: '28', ANDROID_TESTSUITE: '30',
+    VISIONOS: '101',
   };
   return map[name] ?? '1';
 }
@@ -300,9 +391,13 @@ export async function ytSearchMusic(query: string, limit = 20, signal?: AbortSig
   // musicCardShelf variants) — seed the recursive walker from EVERY
   // section so shape changes degrade to the same item set, never zero.
   for (const shelf of shelves) collect(shelf);
-  // songs first, videos after; cap
+  // songs first, videos after; drop non-music junk (news/date-only rows
+  // leak through the recursive walker — a real music row has either a
+  // song badge or a parseable duration); cap videos at 15 min
   const songs = tracks.filter((t) => t.ytKind === 'song');
-  const videos = tracks.filter((t) => t.ytKind !== 'song');
+  const videos = tracks.filter(
+    (t) => t.ytKind !== 'song' && (t.duration ?? 0) > 0 && (t.duration ?? 0) <= 15 * 60,
+  );
   const seen = new Set<string>();
   const merged = [...songs, ...videos].filter((t) => {
     const id = t.youtubeId!;
@@ -313,7 +408,7 @@ export async function ytSearchMusic(query: string, limit = 20, signal?: AbortSig
   return { tracks: merged.slice(0, limit), albums: albums.slice(0, 6), latencyMs: Date.now() - t0 };
 }
 
-// ── stream resolution (client ladder) ──
+// ── stream resolution (client ladder + health + diagnostics) ──
 
 const streamCache = new Map<string, PlayerAudio>();
 const STREAM_CACHE_MAX = 100;
@@ -329,19 +424,123 @@ function pickAudio(formats: any[]): PlayerAudio | null {
       expiresAt: Date.now() + 5.5 * 60 * 60 * 1000, // googlevideo expire ≈ 6h; refresh early
     }));
   if (audios.length === 0) return null;
-  // prefer AAC m4a (universal RNTP/iOS compat), then highest bitrate
+  // prefer AAC m4a itag 140 (universal RNTP compat), then any m4a, then
+  // webm/opus 251 (ExoPlayer decodes it), then highest bitrate of anything
+  const m4a140 = audios.find((a) => a.itag === 140);
+  if (m4a140) return m4a140;
   const m4a = audios.filter((a) => a.mime === 'audio/mp4').sort((a, b) => b.bitrate - a.bitrate);
-  const best = m4a[0] ?? audios.sort((a, b) => b.bitrate - a.bitrate)[0];
-  return best ?? null;
+  if (m4a[0]) return m4a[0];
+  const opus = audios.filter((a) => a.mime === 'audio/webm').sort((a, b) => b.bitrate - a.bitrate);
+  if (opus[0]) return opus[0];
+  return audios.sort((a, b) => b.bitrate - a.bitrate)[0] ?? null;
 }
 
 export interface ResolveOutcome {
   ok: boolean;
   reason?: 'disabled' | 'bot-walled' | 'no-audio' | 'network';
   audio?: PlayerAudio;
+  /** per-rung trail for the honest error surface + lab diagnostics */
+  trail?: string[];
 }
 
-/** Resolve a playable audio URL for a video id (ladder + cache). */
+// per-client health: a client answered LOGIN_REQUIRED/UNPLAYABLE →
+// skip it for a while (innertubex-style DisabledStreamClients)
+const CLIENT_COOLDOWN_MS = 10 * 60 * 1000;
+const clientHealth = new Map<string, { cooldownUntil: number; lastStatus: string }>();
+
+// rolling diagnostics of the LAST resolution attempt (lab G1 evidence)
+let lastTrail: string[] = [];
+export function ytLastDiagnostics(): string[] {
+  return lastTrail;
+}
+
+// ── signatureCipher deciphering (WEB_REMIX family returns obfuscated urls) ──
+
+let decipherCache: { jsPath: string; fn: (s: string) => string } | null = null;
+
+function balancedFrom(src: string, openIdx: number): string | null {
+  let depth = 0, inStr = false, q = '', esc = false;
+  for (let i = openIdx; i < src.length; i += 1) {
+    const c = src[i];
+    if (esc) { esc = false; continue; }
+    if (c === '\\') { esc = true; continue; }
+    if (inStr) { if (c === q) inStr = false; continue; }
+    if (c === "'" || c === '"') { inStr = true; q = c; continue; }
+    if (c === '{' || c === '[' || c === '(') depth += 1;
+    else if (c === '}' || c === ']' || c === ')') {
+      depth -= 1;
+      if (depth === 0) return src.slice(openIdx, i + 1);
+    }
+  }
+  return null;
+}
+
+/** Build the decipher fn from the player JS (classic youtube-dl technique:
+ *  the `X=function(a){a=a.split("")...}` fn + its helper object). */
+async function getDecipherer(jsPath: string): Promise<(s: string) => string> {
+  if (decipherCache && decipherCache.jsPath === jsPath) return decipherCache.fn;
+  const res = await ytFetch(`https://www.youtube.com${jsPath}`);
+  if (!res.ok) throw new Error(`player js http ${res.status}`);
+  const js = await res.text();
+  const fnMatch = js.match(/([\w$]{1,8})\s*=\s*function\(\s*([\w$]+)\s*\)\s*\{\s*\2\s*=\s*\2\.split\(\s*["']{2}\s*\)/);
+  if (!fnMatch || fnMatch.index === undefined) throw new Error('decipher fn not found');
+  const fnName = fnMatch[1];
+  const bodyStart = js.indexOf('{', fnMatch.index);
+  const fnSrc = balancedFrom(js, bodyStart);
+  if (!fnSrc) throw new Error('decipher fn body not found');
+  // helper object referenced inside the fn (first NAME.member usage)
+  const objRef = fnSrc.match(/([\w$]+)\.[\w$]+\(/);
+  let objSrc = '';
+  if (objRef && objRef[1] !== fnName) {
+    const objName = objRef[1];
+    const declPatterns = [
+      `var ${objName}=`,
+      `,${objName}=`,
+      `;${objName}=`,
+      ` ${objName}=`,
+    ];
+    for (const pat of declPatterns) {
+      const at = js.indexOf(pat);
+      if (at >= 0) {
+        const objOpen = js.indexOf('{', at + pat.length - 1);
+        const objBody = objOpen >= 0 ? balancedFrom(js, objOpen) : null;
+        if (objBody) {
+          objSrc = `var ${objName}=${objBody};`;
+          break;
+        }
+      }
+    }
+  }
+  // assemble: helper object decl + full fn source, then call it
+  const fn = new Function('s', `${objSrc}${fnMatch[0]}${fnSrc.slice(1)}; return ${fnName}(s);`) as (s: string) => string;
+  decipherCache = { jsPath, fn };
+  return fn;
+}
+
+/** Resolve signatureCipher entries to plain urls (WEB_REMIX family). */
+async function resolveCipherFormats(player: any): Promise<any[]> {
+  const formats = player?.streamingData?.adaptiveFormats ?? [];
+  if (formats.some((f: any) => typeof f?.url === 'string' && f.url)) return formats;
+  const jsPath: string | undefined = player?.assets?.js;
+  if (!jsPath) return formats;
+  try {
+    const decipher = await getDecipherer(jsPath);
+    return formats.map((f: any) => {
+      const cipher = f.signatureCipher ?? f.cipher;
+      if (!cipher || f.url) return f;
+      const params = new URLSearchParams(cipher);
+      const s = params.get('s');
+      const sp = params.get('sp') ?? 'signature';
+      const base = params.get('url');
+      if (!s || !base) return f;
+      return { ...f, url: `${base}&${sp}=${decipher(s)}` };
+    });
+  } catch {
+    return formats;
+  }
+}
+
+/** Resolve a playable audio URL for a video id (ladder + cache + health). */
 export async function ytResolveStream(videoId: string, signal?: AbortSignal): Promise<ResolveOutcome> {
   if (!ytAvailable()) return { ok: false, reason: 'disabled' };
   const hit = streamCache.get(videoId);
@@ -350,7 +549,18 @@ export async function ytResolveStream(videoId: string, signal?: AbortSignal): Pr
     streamCache.set(videoId, hit); // refresh recency
     return { ok: true, audio: hit };
   }
-  for (const client of YT_CLIENTS) {
+  const trail: string[] = [`resolve ${videoId} @${new Date().toISOString()}`];
+  lastTrail = trail;
+  const now = Date.now();
+  const order = YT_CLIENTS.filter((c) => {
+    const h = clientHealth.get(c.name);
+    if (h && now < h.cooldownUntil) {
+      trail.push(`${c.name}: SKIP (cooldown after ${h.lastStatus})`);
+      return false;
+    }
+    return true;
+  });
+  for (const client of order) {
     try {
       const player = await innertube(
         'player',
@@ -359,23 +569,35 @@ export async function ytResolveStream(videoId: string, signal?: AbortSignal): Pr
         signal,
       );
       const status = player?.playabilityStatus?.status;
-      if (status && status !== 'OK') continue; // LOGIN_REQUIRED / UNPLAYABLE / ERROR → next client
-      const formats = player?.streamingData?.adaptiveFormats ?? [];
+      trail.push(`${client.name}: ${status ?? 'no-status'}${player?.playabilityStatus?.reason ? ` (${player.playabilityStatus.reason})` : ''}`);
+      if (status && status !== 'OK') {
+        if (status === 'LOGIN_REQUIRED' || status === 'UNPLAYABLE') {
+          clientHealth.set(client.name, { cooldownUntil: Date.now() + CLIENT_COOLDOWN_MS, lastStatus: status });
+        }
+        continue; // bot-wall / unplayable → next rung
+      }
+      const formatsRaw = player?.streamingData?.adaptiveFormats ?? [];
+      const formats = client.needsPoToken ? await resolveCipherFormats(player) : formatsRaw;
       const audio = pickAudio(formats);
-      if (!audio) continue;
+      if (!audio) {
+        trail.push(`${client.name}: OK but 0 direct audio urls`);
+        continue;
+      }
+      trail.push(`${client.name}: RESOLVED itag ${audio.itag} ${audio.mime} ${audio.bitrate}bps`);
       streamCache.set(videoId, audio);
       if (streamCache.size > STREAM_CACHE_MAX) {
         const oldest = streamCache.keys().next().value;
         if (oldest !== undefined) streamCache.delete(oldest);
       }
       noteYtSuccess();
-      return { ok: true, audio };
-    } catch {
+      return { ok: true, audio, trail };
+    } catch (e) {
+      trail.push(`${client.name}: threw ${String((e as Error)?.message ?? e).slice(0, 60)}`);
       // network/shape failure — try the next rung
     }
   }
   noteYtFailure();
-  return { ok: false, reason: 'bot-walled' };
+  return { ok: false, reason: 'bot-walled', trail };
 }
 
 /** Stale-URL recovery for the background service (PlaybackError branch). */
@@ -395,7 +617,9 @@ export async function ytStreamUrlForTrack(track: Track): Promise<string | null> 
   return out.ok ? out.audio!.url : null;
 }
 
-/** Test hook — drain the in-memory cache between cases. */
+/** Test hook — drain the in-memory caches between cases. */
 export function clearYtCaches(): void {
   streamCache.clear();
+  clientHealth.clear();
+  lastTrail = [];
 }
