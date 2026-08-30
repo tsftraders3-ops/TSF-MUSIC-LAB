@@ -31,7 +31,7 @@ import { searchItunes } from './itunes';
 import { searchSaavn } from './saavn';
 import { searchLyricByFragment } from './lrclib';
 import { buildLexicon, lexiconReady, restoreLexicon, snapshotLexicon, SNAPSHOT_KEY } from '../search/lexicon';
-import { sigUnmet, runRescueLadder } from '../search/rescue';
+import { sigUnmet, runRescueLadder, titleAuthorityMissing } from '../search/rescue';
 import { ytSearchMusic } from './youtube';
 
 export interface SearchV2Result extends SearchResult {
@@ -287,6 +287,42 @@ export async function searchMusicV2(
       }
     } else {
       sigState = 'hit';
+    }
+  } else if (
+    plan.kind === 'entity_title' &&
+    earlyRanked.length > 0 &&
+    !opts.signal?.aborted
+  ) {
+    // TITLE-ONLY AUTHORITY GAP ("tu chaiye" class): the query is just a
+    // song title, JioSaavn answered with title-matching rows, but every
+    // one of them is a deep-niche cover/remake — the canonical recording
+    // the user means is missing from the catalog. Escalate once via the
+    // rescue ladder; an authoritative row (≥ AUTHORITY_FLOOR plays/views)
+    // paints on top as S-RESCUED. If the ladder finds nothing credible we
+    // keep the organic list silently — title matches ARE honest answers
+    // for a title query, so no false partial/zero is claimed.
+    if (titleAuthorityMissing(earlyRanked)) {
+      const rescue = await runRescueLadder(plan, { signal: opts.signal });
+      if (rescue.tracks.length > 0) {
+        const merged = verifySet(plan, [{ pool: 'rescue', tracks: rescue.tracks }, { pool: 'organic', tracks: toTrackList(earlyRanked) }]);
+        ranked = rankRows(plan, merged.rows, { engagement, artistAffinity: affinity, mutedArtists: muted });
+        sigState = 'rescued';
+      }
+    } else {
+      sigState = 'hit';
+    }
+  }
+
+  // SIG paint contract: the rescued row IS the declared answer — it
+  // paints at rank 1 with the "Best match" reason regardless of what the
+  // organic covers scored (the +0.75 promotion narrows the gap; this
+  // closes it deterministically for both the artist_title and
+  // title-only paths).
+  if (sigState === 'rescued') {
+    const ri = ranked.findIndex((r) => r.rescued);
+    if (ri > 0) {
+      const [hit] = ranked.splice(ri, 1);
+      ranked = [{ ...hit, reasonCode: 'MATCHES_SEARCH' as const }, ...ranked];
     }
   }
 

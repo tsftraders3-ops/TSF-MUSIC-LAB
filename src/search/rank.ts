@@ -80,10 +80,7 @@ function titleCoverage(plan: SearchPlan, row: Candidate, am: number): number {
       .split(/[^a-z0-9\u0900-\u097f]+/)
       .filter(Boolean),
   );
-  let hits = 0;
-  for (const t of wanted) {
-    if (hay.has(t)) hits += 1;
-  }
+  const hits = titleHitCount(wanted, acceptableTitleTokens(plan), hay);
   return Math.min(1, hits / wanted.length);
 }
 
@@ -94,6 +91,48 @@ export function titleQueryTokens(plan: SearchPlan): string[] {
   const STOP = new Set(['from', 'the', 'a', 'an']);
   const base = plan.titleTokens.length ? plan.titleTokens : plan.tokens;
   return base.filter((t) => t.length >= 2 && !STOP.has(t) && !TYPE_WORDS.has(t));
+}
+
+/** SIG M1.3 applied to MATCHING: the plan's bounded ortho variants
+ *  ("chaiye"→"chahiye") are alternative spellings of the SAME title
+ *  token — a row using the standard spelling must not lose to a row
+ *  that copied the user's typo (live: "Tu Chahiye | Pritam & Atif
+ *  Aslam" scored 0.5 while same-name covers spelled "Tu Chaiye" scored
+ *  1.0). Returns the ORIGINAL tokens plus the variant-only tokens;
+ *  empty plan.variants ⇒ a set identical to titleQueryTokens ⇒ zero
+ *  behavior change for correctly-spelled queries. */
+export function acceptableTitleTokens(plan: SearchPlan): Set<string> {
+  const orig = titleQueryTokens(plan);
+  const set = new Set(orig);
+  const origSet = new Set(orig);
+  for (const v of plan.variants ?? []) {
+    for (const t of normalizeQuery(v).split(/[^a-z0-9\u0900-\u097f]+/)) {
+      if (t.length >= 2 && !TYPE_WORDS.has(t) && !origSet.has(t)) set.add(t);
+    }
+  }
+  return set;
+}
+
+/** Count how many of the ORIGINAL title tokens the row's title covers,
+ *  accepting an ortho variant as a hit (each extra acceptable token is
+ *  consumable — one variant answers one missing original). Deterministic
+ *  and bounded; shared by rank coverage and rescue verification. */
+export function titleHitCount(origTokens: string[], acceptable: Set<string>, hay: Set<string>): number {
+  if (origTokens.length === 0) return 0;
+  const extras = [...acceptable].filter((t) => !origTokens.includes(t));
+  let hits = 0;
+  for (const t of origTokens) {
+    if (hay.has(t)) {
+      hits += 1;
+      continue;
+    }
+    const vi = extras.findIndex((v) => hay.has(v));
+    if (vi !== -1) {
+      extras.splice(vi, 1);
+      hits += 1;
+    }
+  }
+  return hits;
 }
 
 /** SIG M2.2 — word-boundary artist matching with the prefix-only rule.
@@ -138,7 +177,7 @@ function artistMatchScore(plan: SearchPlan, row: Candidate): number {
  *  "Tum Hi Ho Bandhu" for query "tum hi ho" = 3/4 = 0.75; an exact
  *  "Tum Hi Ho" title = 1.0. Distinguishes the song from its neighbors. */
 function titlePrecision(plan: SearchPlan, row: Candidate): number {
-  const wanted = new Set(titleQueryTokens(plan));
+  const wanted = acceptableTitleTokens(plan);
   const titleTokens = normalizeQuery(row.title)
     .split(' ')
     .filter((t) => t.length >= 2);
@@ -238,6 +277,18 @@ export function rankRows(
         r.score = titleOnlyCap - 0.001;
       }
     }
+  }
+
+  // RESCUE PROMOTION (title-only SIG): a rescued row that genuinely
+  // matches the title IS the canonical recording the query means
+  // (live-probed: 100M+ views vs the covers' ≤198k plays). A bounded
+  // +0.75 — smaller than one provider-rank step's provider component,
+  // larger than the quality gap between a 100M row and a 22k cover —
+  // deterministically tops same-title covers. The artist_title path
+  // already tops its rescue row via the override above; this only
+  // removes the thin-margin fragility there too.
+  for (const r of scored) {
+    if (r.rescued && r.queryMatch >= 0.5) r.score += 0.75;
   }
 
   // deterministic order: score desc, then trackId asc

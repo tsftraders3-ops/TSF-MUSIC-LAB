@@ -722,6 +722,16 @@ export function SearchScreen() {
                   Found via Apple Music · 30s preview
                 </Text>
               ) : null}
+              {meta.sigState === 'rescued' && results[0]?.rescueRung === 'variant' ? (
+                <Text style={styles.sigRescuedNote}>
+                  Found under a different spelling
+                </Text>
+              ) : null}
+              {meta.sigState === 'rescued' && results[0]?.rescueRung === 'album' ? (
+                <Text style={styles.sigRescuedNote}>
+                  Found via its album · full song
+                </Text>
+              ) : null}
               {meta.degraded ? (
                 <Text style={styles.degradedNote}>
                   Full-length streams unavailable — some results are 30s previews

@@ -124,9 +124,12 @@ describe('SI4 — queryMatch truth: artist tokens never double-count (M2.1)', ()
     const plan = planSearch(THE_QUERY);
     const ranked = rankRows(plan, verifySet(plan, [{ pool: 'p1', tracks: JUNK }]).rows);
     const row = ranked.find((r) => r.title === 'Tu Chahiye');
-    // "chaiye" (query) \u2260 "chahiye" (title) as exact tokens \u2014 coverage is
-    // 1/2 = 0.5, which is exactly the SIG bar it must clear
-    expect(row!.queryMatch).toBe(0.5);
+    // ortho-aware coverage (M1.3 applied to matching): "chahiye" in the
+    // title is a plan-variant of the query's "chaiye", so BOTH tokens hit
+    // \u2014 coverage 2/2 = 1.0 (previously 0.5 with exact-token matching).
+    // The SIG bar itself is unchanged: the row must still clear 0.5 to
+    // count as a title-match row, and artist tokens still never inflate it.
+    expect(row!.queryMatch).toBe(1);
     expect(row!.queryMatch).toBeGreaterThanOrEqual(0.5);
     expect(row!.artistMatch).toBe(0);
   });

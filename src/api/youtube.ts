@@ -182,6 +182,27 @@ function parseDuration(text: string | undefined): number {
   return parts.reduce((acc, p) => acc * 60 + p, 0);
 }
 
+/** Parse a humanized count segment into a real number.
+ *  "6.2M views" → 6_200_000 · "93K plays" → 93_000 · "943 views" → 943
+ *  Indian-locale units too: "1.2 Cr" → 12_000_000 · "4.5 L" → 450_000.
+ *  (The old `replace(/[^0-9.]/g,'')` turned "6.2M" into 6 — the rank
+ *  engine's authority signal was reading thousandths of the truth.) */
+export function parseHumanCount(text: string | undefined): number | undefined {
+  if (!text) return undefined;
+  const m = text.replace(/,/g, '').match(/([\d.]+)\s*(lakh|crore|cr|k|m|b|l)?/i);
+  if (!m || m[1] === '' || m[1] === '.') return undefined;
+  const n = parseFloat(m[1]);
+  if (!Number.isFinite(n)) return undefined;
+  const unit = (m[2] ?? '').toLowerCase();
+  const mult =
+    unit === 'k' ? 1e3 :
+    unit === 'm' ? 1e6 :
+    unit === 'b' ? 1e9 :
+    unit === 'l' || unit === 'lakh' ? 1e5 :
+    unit === 'cr' || unit === 'crore' ? 1e7 : 1;
+  return Math.round(n * mult);
+}
+
 function firstVideoId(item: any): string | null {
   const text = JSON.stringify(item);
   const m = text.match(/"watchEndpoint":\{"videoId":"([\w-]{11})"/);
@@ -228,7 +249,7 @@ function toTrack(item: any): Track | null {
     duration: parseDuration(durationSeg),
     source: 'youtube',
     previewOnly: false,
-    playCount: playsSeg ? Number((playsSeg.replace(/[^0-9.]/g, '') || '0')) || undefined : undefined,
+    playCount: playsSeg ? parseHumanCount(playsSeg) : undefined,
   } as unknown as Track;
 }
 

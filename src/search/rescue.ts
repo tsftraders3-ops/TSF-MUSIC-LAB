@@ -23,7 +23,7 @@
 import type { Track } from '../types';
 import type { SearchPlan } from './plan';
 import { artistContains } from './rank';
-import { titleQueryTokens } from './rank';
+import { titleQueryTokens, acceptableTitleTokens, titleHitCount } from './rank';
 import { normalizeQuery } from './normalize';
 import { searchSaavn } from '../api/saavn';
 import { searchItunes } from '../api/itunes';
@@ -31,6 +31,49 @@ import { ytSearchMusic, ytStreamUrlForTrack, ytAvailable } from '../api/youtube'
 import { searchAlbumResults, getAlbumTracks } from '../api/saavn';
 
 export type RescueRung = 'youtube' | 'itunes' | 'variant' | 'album';
+
+/** AUTHORITY FLOOR — the popularity a "the" recording leaves behind.
+ *  When a famous song is missing from a catalog, what remains in its
+ *  place is covers/remakes in the hundreds-of-plays tier (live-probed
+ *  "tu chaiye": every JioSaavn row ≤ 198k, the real song has 100M+).
+ *  Rows at/above this floor are treated as the canonical release; rows
+ *  below it as same-name noise. */
+export const AUTHORITY_FLOOR = 250_000;
+
+/** TITLE-ONLY AUTHORITY GAP — the class the "tu chaiye" (no artist
+ *  typed) complaint lives in: the plan has NO artistTokens so the
+ *  artist_title SIG gate never fires, yet every title-matching row the
+ *  provider returned is deep-niche. The famous recording the user means
+ *  is almost certainly absent from the catalog → escalate once via the
+ *  rescue ladder instead of confidently painting covers.
+ *  Requires ≥1 genuinely title-matching row (queries with NO title
+ *  match belong to the honest-zero/recovery path, not this one). */
+export function titleAuthorityMissing(
+  rows: Array<{ playCount?: number; queryMatch?: number }>,
+): boolean {
+  const matching = rows.filter((r) => (r.queryMatch ?? 0) >= 0.5);
+  if (matching.length === 0) return false;
+  return matching.slice(0, 6).every((r) => (r.playCount ?? 0) < AUTHORITY_FLOOR);
+}
+
+/** Does THIS row carry enough weight to be the rescue answer? For
+ *  artist_title plans the artist axis already proves identity (unchanged
+ *  from the shipped, device-verified path). Title-only plans have no
+ *  artist axis — the rescue row must ITSELF be the popular canonical
+ *  recording, or we'd rescue one obscure cover with another. iTunes is
+ *  exempt: the official store carries no play metric, and its ranking
+ *  + dual title verification is the identity signal there. YT Music
+ *  song-kind rows ALSO never carry a view metric (only video rows do),
+ *  so an UNKNOWN metric is allowed for youtube rows — bestFirst()
+ *  ordering + remix demotion rank them — while a KNOWN-SMALL metric
+ *  (< floor) is a hard reject. JioSaavn routes (variant/album) report
+ *  play counts reliably, so they need the floor for real. */
+function rescueRowAuthoritative(plan: SearchPlan, t: Track): boolean {
+  if (plan.artistTokens.length > 0) return true;
+  if (t.source === 'itunes') return true;
+  if (t.source === 'youtube') return t.playCount === undefined || t.playCount >= AUTHORITY_FLOOR;
+  return (t.playCount ?? 0) >= AUTHORITY_FLOOR;
+}
 
 export interface RescueDeps {
   disabled?: () => boolean;
@@ -54,17 +97,30 @@ export function sigUnmet(plan: SearchPlan, rows: Array<{ artistMatch: number; qu
 }
 
 /** Dual-axis verification for rescue rows (the rescue row must be the
- *  song the user asked for — same bar as a native S-HIT row). */
+ *  song the user asked for — same bar as a native S-HIT row). Title
+ *  side is ortho-aware: the plan's variants ("chaiye"→"chahiye") count
+ *  as the same token, so the correctly-spelled canonical recording
+ *  verifies at full strength instead of 0.5. */
 export function verifyRescueRow(plan: SearchPlan, track: Track): boolean {
-  if (!plan.artistTokens.length) return true;
-  const titleTokens = titleQueryTokens(plan);
+  if (!plan.artistTokens.length) {
+    const orig = titleQueryTokens(plan);
+    if (orig.length === 0) return true;
+    const hay = new Set(
+      normalizeQuery(track.title)
+        .split(/[^a-z0-9\u0900-\u097f]+/)
+        .filter(Boolean),
+    );
+    const hits = titleHitCount(orig, acceptableTitleTokens(plan), hay);
+    return hits / orig.length >= 0.5;
+  }
+  const orig = titleQueryTokens(plan);
   const hay = new Set(
     normalizeQuery(track.title)
       .split(/[^a-z0-9\u0900-\u097f]+/)
       .filter(Boolean),
   );
-  const hits = titleTokens.filter((t) => hay.has(t)).length;
-  const titleOk = titleTokens.length > 0 && hits / titleTokens.length >= 0.5;
+  const hits = titleHitCount(orig, acceptableTitleTokens(plan), hay);
+  const titleOk = orig.length > 0 && hits / orig.length >= 0.5;
   const credits = track.artistsFull?.length ? track.artistsFull : track.artist.split(/,\s*/);
   const artistOk = plan.artistTokens.some((a) =>
     credits.some((c) => artistContains(normalizeQuery(c), a)),
@@ -80,13 +136,36 @@ function mark(track: Track, rung: RescueRung): Track {
   return { ...track, rescued: true, rescueRung: rung };
 }
 
+const RUNG_PICK_DEMOTIONS =
+  /\b(slowed|reverb|lofi|lo-fi|remix|nightcore|8d|bass ?boosted|sped ?up|unplugged|cover|karaoke|instrumental|tribute|reaction|lofi mix)\b/i;
+
+/** Deterministic best-first order for candidate rescue rows:
+ *  1. demote edit-class junk whose TITLE admits it (Slowed+Reverb, Lo-Fi
+ *     Mix, Unplugged Cover, REMIX…) — these routinely carry HUGE view
+ *     counts and must never be the canonical answer
+ *  2. popularity desc (YT video rows carry views; song rows don't)
+ *  3. provider order (stable) — YT Music lists the official catalog
+ *     songs first, which is the right tiebreak for metric-less rows
+ *  (Sort is stable per spec — equal keys keep YT's own ranking.) */
+function bestFirst(rows: Track[]): Track[] {
+  return [...rows].sort(
+    (a, b) =>
+      Number(RUNG_PICK_DEMOTIONS.test(a.title)) - Number(RUNG_PICK_DEMOTIONS.test(b.title)) ||
+      (b.playCount ?? 0) - (a.playCount ?? 0),
+  );
+}
+
 /** R0 — YouTube full-length: search → verify → resolve stream. */
 async function rungYoutube(plan: SearchPlan, deps: RescueDeps): Promise<Track[]> {
   if (!ytAvailable() || !within(deps.deadline)) return [];
   const q = `${plan.titleTokens.join(' ')} ${plan.artistTokens.join(' ')}`.trim();
   if (!q) return [];
   const res = await ytSearchMusic(q, 10, deps.signal).catch(() => ({ tracks: [] as Track[] }));
-  const verified = (res.tracks ?? []).filter((t) => verifyRescueRow(plan, t));
+  const verified = bestFirst(
+    (res.tracks ?? []).filter(
+      (t) => verifyRescueRow(plan, t) && rescueRowAuthoritative(plan, t),
+    ),
+  );
   if (verified.length === 0) return [];
   // resolve the best row's stream — an unrescuable row helps nobody
   for (const t of verified.slice(0, 3)) {
@@ -94,6 +173,16 @@ async function rungYoutube(plan: SearchPlan, deps: RescueDeps): Promise<Track[]>
     if (url) {
       return [{ ...t, streamUrl: url } as Track & { streamUrl: string }].map((x) => mark(x, 'youtube'));
     }
+  }
+  // TITLE-ONLY FALLBACK: playback extraction can be bot-walled from some
+  // networks while search + the authority signal are healthy. A verified
+  // + authoritative title-only row without a pre-resolved URL still lets
+  // the player resolve at tap time (PlayerProvider YT branch + service
+  // refresh). Artist plans keep the shipped strict behavior: no stream,
+  // no row (their rows are verified against a known artist, so the
+  // organic set below is already trustworthy).
+  if (plan.artistTokens.length === 0) {
+    return verified.slice(0, 1).map((t) => mark(t, 'youtube'));
   }
   return [];
 }
@@ -114,7 +203,9 @@ async function rungVariant(plan: SearchPlan, deps: RescueDeps): Promise<Track[]>
   for (const v of variants.slice(0, 2)) {
     const q = plan.artistTokens.length ? `${v} ${plan.artistTokens.join(' ')}` : v;
     const rows = await searchSaavn(q, 15, deps.signal).catch(() => [] as Track[]);
-    const verified = rows.filter((t) => verifyRescueRow(plan, t));
+    const verified = rows.filter(
+      (t) => verifyRescueRow(plan, t) && rescueRowAuthoritative(plan, t),
+    );
     if (verified.length > 0) return verified.map((t) => mark(t, 'variant'));
   }
   return [];
@@ -128,7 +219,9 @@ async function rungAlbum(plan: SearchPlan, deps: RescueDeps): Promise<Track[]> {
   for (const alb of albums.slice(0, 3)) {
     if (!within(deps.deadline)) break;
     const tracks = await getAlbumTracks(alb.id).catch(() => [] as Track[]);
-    const verified = tracks.filter((t) => verifyRescueRow(plan, t));
+    const verified = tracks.filter(
+      (t) => verifyRescueRow(plan, t) && rescueRowAuthoritative(plan, t),
+    );
     if (verified.length > 0) return verified.map((t) => mark(t, 'album'));
   }
   return [];
