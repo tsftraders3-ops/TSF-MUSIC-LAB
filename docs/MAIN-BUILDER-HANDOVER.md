@@ -1,9 +1,9 @@
 # TSF MUSIC — MAIN-BUILDER HANDOVER REPORT
-### Everything the Lab (v3.4.0-lab.1 → v3.4.0-lab.4) changed in the program, what each change bought, and how to port it into the main app
+### Everything the Lab (v3.4.0-lab.1 → v3.4.0-lab.5) changed in the program, what each change bought, and how to port it into the main app
 
-**Prepared:** after lab.4 ship · **Baseline:** main repo `v3.3.0` (Search V2 engine) · **Lab target:** real-device proof of every feature, zero resource use (all builds via GitHub Actions CI — never build locally)
+**Prepared:** after lab.5 ship · **Baseline:** main repo `v3.3.0` (Search V2 engine) · **Lab target:** real-device proof of every feature, zero resource use (all builds via GitHub Actions CI — never build locally)
 
-**Scope in one line:** the lab took the v3.3.0 app and added (1) a title-truth search contract with an automatic rescue ladder, (2) a complete YouTube source with ad-free full-song playback that survives YouTube's bot defenses, (3) a never-blank player failure path, and (4) fullscreen window determinism + UI hardening — all verified on a real Android device and shipped as four GitHub Releases.
+**Scope in one line:** the lab took the v3.3.0 app and added (1) a title-truth search contract with an automatic rescue ladder, (2) a complete YouTube source with ad-free full-song playback that survives YouTube's bot defenses, (3) a never-blank player failure path, (4) fullscreen window determinism + UI hardening, and (5) a YouTube-tab title-truth purge/rank + native font delivery — all verified on a real Android device and shipped as five GitHub Releases.
 
 ---
 
@@ -15,8 +15,9 @@
 | lab.2 | `v3.4.0-lab.2` @ `86e31e8` | Title-only authority-gap rescue + ortho-aware matching + YT view-count parse fix + junk-demoted rescue pick | The exact user failure ("tu chaiye" → cover listing) fixed: the official Atif Aslam song now wins with a "Found on YouTube · full song, ad-free" label |
 | lab.3 | `v3.4.0-lab.3` @ `130dc2f` | Full YouTube **playback** rebuild: VISIONOS tokenless ladder + BotGuard PO-token WebView minter + honest failure toasts + search junk filter | Tapping any YouTube song plays the full song ad-free on device; no more blank player; junk rows (Slowed/Reverb/random videos) gone from YouTube results |
 | lab.4 | `v3.4.0-lab.4` @ `cb710e7` | Fullscreen window policy (config plugin) + insets-aware tab bar + refreshed What's-New dialog | The half-screen UI wedge (app stuck in a Samsung split-window with the launcher visible below) is impossible now; tab bar respects gesture-nav insets; users get in-app confirmation they're on the new build |
+| lab.5 | `v3.4.0-lab.5` @ `4dc653a` | YouTube-tab title-truth purge + rank + top-result gate (`src/search/ytrank.ts`) + native font delivery (`plugins/withNativeFonts.js`) + strict duration parse | YouTube search paints the OFFICIAL song as Top result (remixes/lo-fi sink, episodes/podcasts/profiles purged — the lab.4 field report's junk list is gone); text can never fall back to the device system font |
 
-Device acceptance status: **playback confirmed working by the user on-device after lab.3** ("everything is completely fine, it is working very good… no ad"); lab.4 fixes the UI/window report from the same session.
+Device acceptance status: **playback confirmed working by the user on-device after lab.3** ("everything is completely fine, it is working very good… no ad"); lab.4 fixed the half-screen window report (lab.5 field screenshots render full-screen, and the shipped APK manifest was verified to carry the policy); lab.5 fixes the YouTube-tab content mess + font fallback reported after lab.4.
 
 ---
 
@@ -106,7 +107,35 @@ The reported UI disturbance class (window wedges, half-screen states) is elimina
 
 ---
 
-## 4. FILE-BY-FILE INVENTORY (v3.3.0 → lab.4, code only)
+## 3b. YOUTUBE-TAB TITLE-TRUTH + NATIVE FONTS (lab.5)
+
+### The field report
+Lab.4 device screenshots (full-screen ✓) exposed the YouTube tab's content mess: **"TU CHAHIYE (Lo-Fi Mix)… 188K views" crowned the Top-result card**, REMIXes outranked the official recording, and off-topic junk ("Sea Buckthorn benefits", "Onion Oil for Hair Loss", "Dostoevsky", shayari episodes) filled the Songs list. Separately, search/player text fell back to the device's handwritten system font.
+
+### Root causes (proven against LIVE WEB_REMIX responses)
+1. **Kind misclassification:** `toTrack` defaulted every row without an explicit "Video •" prefix to `ytKind:'song'` — card-shelf videos (no kind word, views-pattern subtitles) and Episode/Podcast/Profile/Playlist rows all leaked into the Songs list, bypassing the video duration cap.
+2. **Duration parser bug:** `parseInt` on `"23h ago"` returned **23 seconds**, so date-subtitled videos passed the `≤15 min` filter too.
+3. **No title truth on the YT tab:** the tab painted YT's raw order — which is engagement-first (a 6.2M-view remix outranks a metric-less official song row).
+4. **Font delivery:** fonts shipped only as expo-font JS assets registered via `Font.loadAsync` at runtime (content-hashed names; **zero native font entries in the lab.4 APK — verified by ZIP inspection**). Any JS-side load failure = permanent system-font fallback.
+
+### The fix
+1. **`src/api/youtube.ts` — purge at the source:** strict duration parse (`/^\d{1,2}(:\d{2}){1,2}$/` — `parseYtDuration`); kind decision tree in `toTrack`: explicit `Song`/`Video` honored, every other kind word (`Episode/Playlist/Profile/Podcast/Album/Artist/EP/Single/…`) dropped, kind-less card rows classified structurally (views → video with **credits-first artist**; duration-only → song); anything unidentifiable dropped.
+2. **`src/search/ytrank.ts` (new) — TITLE-TRUTH rank:** coverage × precision (ortho-aware via the plan's variants, same math family as rank.ts), artist-axis bonus, edit-class junk demotion (remix/lo-fi/slowed/cover/unplugged/karaoke/mix/… capped at −2.8), lyric-class −0.6, views only break ties (≤ +0.35), song-kind +0.3. Stable tiebreak = provider order. Returns `topConfident` (best row cov ≥ 0.5).
+3. **`SearchScreen.tsx` — YT-TOP GATE:** the "Top result" hero only paints on `topConfident`; otherwise a flat "Songs" header. Junk can never hold the crown.
+4. **`plugins/withNativeFonts.js` (new) — native font delivery:** `withDangerousMod` copies `assets/fonts/*.ttf` → `android/app/src/main/assets/fonts/` during prebuild. RN's Android font resolver answers `fontFamily: 'Figtree-*'` natively from frame one — no JS gate, no fallback window, and the cold-start blank flash (`if (!fontsReady) return null`) is gone on Android (the async gate remains web-only). **Verified** by real prebuild (6 TTFs in the generated project).
+5. What's-New seen-key refreshed (`tsf.whatsNew.v3_4_0_lab5`).
+
+### Proof
+- **Live e2e (sandbox → real WEB_REMIX):** query `tu chaiye` → #1 **Tu Chahiye · Pritam, Atif Aslam & Amitabh Bhattacharya** (hero confident), Lo-Fi Mix sunk to #8, remixes #5–6, ZERO off-topic rows. Artist-qualified query: official first.
+- **Tests:** 161/161 (new suites: junk purge incl. the exact live-probed junk rows, title-truth ordering, top gate, strict duration).
+- **Visual gauntlet** (web harness, real pipeline on the live-probed fixture payload): home/search/YouTube search/player/library/premium/AI across 412×915, 360×740, 800×1280, 915×412 — all clean; Top result correct at every width.
+
+### Why it matters
+The YouTube tab is now governed by the SAME title-truth contract as the Catalog tab. Port `ytrank.ts` + the `youtube.ts` parse/classification changes + the `SearchScreen` gate as a unit; the font plugin removes a whole class of "app looks like a different app" reports.
+
+---
+
+## 4. FILE-BY-FILE INVENTORY (v3.3.0 → lab.5, code only)
 
 **New (source):**
 | File | Lines | Purpose |
@@ -114,9 +143,11 @@ The reported UI disturbance class (window wedges, half-screen states) is elimina
 | `src/api/youtube.ts` | 625 | YT client registry (search WEB_REMIX; playback VISIONOS→WEB_REMIX attested→ANDROID_VR), stream extraction, PO-token consumption, junk filter, diagnostics |
 | `src/api/ytPoToken.tsx` | 303 | Hidden-WebView BotGuard minter + RN bridge (session + per-video PO tokens) |
 | `src/search/rescue.ts` | 255 | Rescue ladder, authority floor, bestFirst junk demotion, ortho-aware verification |
+| `src/search/ytrank.ts` | 120 | YT-tab title-truth rank + topConfident gate (lab.5) |
 | `plugins/withWindowPolicy.js` | 58 | Fullscreen window policy manifest mod (config plugin) |
+| `plugins/withNativeFonts.js` | 48 | Native font delivery into android assets at prebuild (config plugin, lab.5) |
 
-**Modified (source):** `src/api/music.ts` (SIG gate + rescued paint) · `src/search/rank.ts` (+ortho tokens, rescue promotion, deterministic sort) · `src/search/plan.ts` + `src/search/normalize.ts` (variants) · `src/search/retrieve.ts` (YT rung wiring) · `src/api/saavn.ts` (+24 lines, helpers for ladder) · `src/player/PlayerProvider.tsx` (never-blank path + bridge mount) · `src/player/service.ts` (+9, playback hardening) · `src/components/TrackMenu.tsx` (+YT-aware actions) · `src/components/WhatsNewDialog.tsx` (3.4.0 content/key) · `src/screens/SearchScreen.tsx` (rescued labels) · `App.tsx` (insets-aware tab bar) · `src/types.ts` (sigState/rescueRung/YT fields) · `app.json` (plugin wiring)
+**Modified (source):** `src/api/music.ts` (SIG gate + rescued paint) · `src/search/rank.ts` (+ortho tokens, rescue promotion, deterministic sort) · `src/search/plan.ts` + `src/search/normalize.ts` (variants) · `src/search/retrieve.ts` (YT rung wiring) · `src/api/youtube.ts` (lab.5: strict `parseYtDuration`, kind decision tree, purge + rank + `topConfident`) · `src/api/saavn.ts` (+24 lines, helpers for ladder) · `src/player/PlayerProvider.tsx` (never-blank path + bridge mount) · `src/player/service.ts` (+9, playback hardening) · `src/components/TrackMenu.tsx` (+YT-aware actions) · `src/components/WhatsNewDialog.tsx` (3.4.0 content/key ×2) · `src/screens/SearchScreen.tsx` (rescued labels + YT-TOP GATE) · `App.tsx` (insets-aware tab bar; web-only font gate) · `src/types.ts` (sigState/rescueRung/YT fields) · `app.json` (plugin wiring ×2) · `metro.config.js` (web-harness aliases incl. lab.5 WebView/YouTube mocks)
 
 **New (tests — 646 lines, all headless, no device needed):** `tests/ai/search_rescue.test.ts` (199) · `tests/ai/search_sig_e2e.test.ts` (234) · `tests/ai/youtube.test.ts` (213)
 
@@ -161,13 +192,13 @@ The reported UI disturbance class (window wedges, half-screen states) is elimina
 
 ## 8. PORTING CHECKLIST (ordered, for the main builder)
 
-1. Copy `src/search/rescue.ts`, `src/api/youtube.ts`, `src/api/ytPoToken.tsx`, `plugins/withWindowPolicy.js` verbatim.
+1. Copy `src/search/rescue.ts`, `src/search/ytrank.ts`, `src/api/youtube.ts`, `src/api/ytPoToken.tsx`, `plugins/withWindowPolicy.js`, `plugins/withNativeFonts.js` verbatim.
 2. Apply the diffs to `src/api/music.ts`, `src/search/rank.ts`, `src/search/plan.ts`, `src/search/normalize.ts`, `src/search/retrieve.ts`, `src/api/saavn.ts`, `src/types.ts` (mechanical; the lab diff is the reference).
 3. Apply `src/player/PlayerProvider.tsx` + `src/player/service.ts` changes; mount `<YtPoTokenBridge />` at the PlayerProvider root (exactly once, above navigation).
-4. Apply `SearchScreen.tsx` rescued-state labels and `TrackMenu.tsx` YT-aware actions.
-5. Add `react-native-webview@^14` to the main app; wire `./plugins/withWindowPolicy` into the main `app.json`.
-6. Copy the three test suites; run `bun run typecheck && bun test` — must be green with the main suite included.
-7. Keep `App.tsx` tab bar insets-awareness if the main app's shell matches; otherwise port the principle (bar height + mini-player offset include `insets.bottom`).
+4. Apply `SearchScreen.tsx` rescued-state labels + YT-TOP GATE (`hideTopHero` / `topConfident`) and `TrackMenu.tsx` YT-aware actions.
+5. Add `react-native-webview@^14` to the main app; wire `./plugins/withWindowPolicy` AND `./plugins/withNativeFonts` into the main `app.json`.
+6. Copy the test suites (rescue, sig-e2e, youtube — 161 lab tests total); run `bun run typecheck && bun test` — must be green with the main suite included.
+7. Keep `App.tsx` tab bar insets-awareness + native-font delivery (Android renders `Figtree-*` from native assets; keep any font-gate web-only) if the main app's shell matches; otherwise port the principles.
 8. Update the main app's What's-New flow for the merged release.
 9. Ship via CI only; verify the Release asset and versionName/versionCode.
 
@@ -182,4 +213,4 @@ The reported UI disturbance class (window wedges, half-screen states) is elimina
 
 ---
 
-*Report generated from the lab repo at `cb710e7` (tag `v3.4.0-lab.4`). Releases: https://github.com/tsftraders3-ops/TSF-MUSIC-LAB/releases*
+*Report generated from the lab repo at `4dc653a` (tag `v3.4.0-lab.5`). Releases: https://github.com/tsftraders3-ops/TSF-MUSIC-LAB/releases*
