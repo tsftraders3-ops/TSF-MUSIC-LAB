@@ -36,6 +36,7 @@ import TrackPlayer, {
 } from 'react-native-track-player';
 import type { Track } from '../types';
 import { resolveStreamUrl } from '../api/saavn';
+import { ytStreamUrlForTrack } from '../api/youtube';
 import { playbackService } from './service';
 import { getRecommendations } from '../ai/engine';
 import { mindbeat } from '../ai/mindbeat';
@@ -252,10 +253,33 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   async function buildPlayable(tracks: Track[]): Promise<RNTrack[]> {
     const downloads = await getDownloadIndex();
     const byId = new Map(downloads.map((d) => [d.id, d]));
+    // YOUTUBE SOURCE: resolve stream URLs BEFORE queue construction
+    // (RNTP needs a real url per item). Concurrency-limited (4) so a
+    // 25-row YT queue costs ~ceiling(25/4) probes; the module's LRU
+    // makes repeats free. Failures drop the row — never stall the queue.
+    const ytUrls = new Map<string, string | null>();
+    const ytTracks = tracks.filter((t) => t.source === 'youtube');
+    if (ytTracks.length > 0) {
+      let cursor = 0;
+      const CONCURRENCY = 4;
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENCY, ytTracks.length) }, async () => {
+          while (cursor < ytTracks.length) {
+            const t = ytTracks[cursor];
+            cursor += 1;
+            const url = t.streamUrl ?? (await ytStreamUrlForTrack(t).catch(() => null));
+            ytUrls.set(t.id, url);
+          }
+        }),
+      );
+    }
     const playable: RNTrack[] = [];
     for (const t of tracks) {
       const local = byId.get(t.id);
-      const url = local?.localUri || t.localUri || resolveStreamUrl(t);
+      const url =
+        t.source === 'youtube'
+          ? t.streamUrl || ytUrls.get(t.id) || null
+          : local?.localUri || t.localUri || resolveStreamUrl(t);
       if (!url) continue;
       playable.push({
         id: t.id,
@@ -267,6 +291,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         source: t.source,
         saavnId: t.saavnId,
         encryptedUrl: t.encryptedUrl,
+        youtubeId: t.youtubeId,
         previewUrl: t.previewUrl,
         previewOnly: t.previewOnly,
         has320: t.has320,

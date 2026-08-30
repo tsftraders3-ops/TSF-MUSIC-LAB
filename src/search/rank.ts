@@ -25,7 +25,7 @@
 import type { Track } from '../types';
 import type { SearchPlan } from './plan';
 import type { Candidate } from './verify';
-import { normalizeQuery } from './normalize';
+import { normalizeQuery, TYPE_WORDS } from './normalize';
 
 export type SearchReasonCode =
   | 'MATCHES_SEARCH'
@@ -64,18 +64,22 @@ function providerRankScore(poolRank: number): number {
   return Math.max(0.15, 1.0 * Math.pow(0.91, poolRank));
 }
 
-/** Query-token coverage across the row's title AND artist names — a row
- *  is relevant when the user's words match what the row IS (title) or
- *  WHO made it (artists). Artist-name searches must never zero out. */
-function titleCoverage(plan: SearchPlan, row: Candidate): number {
-  const STOP = new Set(['from', 'the', 'a', 'an']);
-  const hay = new Set(
-    `${row.title} ${row.artistsFull?.join(' ') ?? row.artist} ${row.featuredArtists?.join(' ') ?? ''}`
-      .toLowerCase()
-      .split(/[^a-z0-9\u0900-\u097f]+/),
-  );
-  const wanted = plan.tokens.filter((t) => t.length >= 2 && !STOP.has(t));
+/** Query-token coverage — SIG M2.1, kind-aware:
+ *  artist_title  → title tokens vs the row's TITLE (artist tokens never
+ *                  double-count; that inflated O'Meri Laila to qm=0.40)
+ *  entity_artist → the row IS by the artist (boundary artist match is
+ *                  the coverage signal — "arijit singh" must surface his
+ *                  songs even when the title is "Tum Hi Ho")
+ *  entity_title  → query tokens vs the row's TITLE */
+function titleCoverage(plan: SearchPlan, row: Candidate, am: number): number {
+  if (plan.kind === 'entity_artist') return am >= 1 ? 1 : 0;
+  const wanted = titleQueryTokens(plan);
   if (wanted.length === 0) return 0;
+  const hay = new Set(
+    normalizeQuery(row.title)
+      .split(/[^a-z0-9\u0900-\u097f]+/)
+      .filter(Boolean),
+  );
   let hits = 0;
   for (const t of wanted) {
     if (hay.has(t)) hits += 1;
@@ -83,14 +87,49 @@ function titleCoverage(plan: SearchPlan, row: Candidate): number {
   return Math.min(1, hits / wanted.length);
 }
 
+/** The tokens that must appear in a row's TITLE for it to count as a
+ *  title match: connector-stripped titleTokens (they mirror the query's
+ *  title side for every kind), falling back to tokens. */
+export function titleQueryTokens(plan: SearchPlan): string[] {
+  const STOP = new Set(['from', 'the', 'a', 'an']);
+  const base = plan.titleTokens.length ? plan.titleTokens : plan.tokens;
+  return base.filter((t) => t.length >= 2 && !STOP.has(t) && !TYPE_WORDS.has(t));
+}
+
+/** SIG M2.2 — word-boundary artist matching with the prefix-only rule.
+ *  "atif aslam" matches "Atif Aslam" and "Muhammad Atif Aslam" (extra
+ *  tokens BEFORE the name are honorifics/name-forms) but NEVER "Atif
+ *  Aslam BD" / "Arijit Singh Official" (extra tokens AFTER the name are
+ *  channel/re-upload junk). */
+export function artistContains(creditLower: string, artistLower: string): boolean {
+  const credit = creditLower.split(/[^a-z0-9\u0900-\u097f]+/).filter(Boolean);
+  const target = artistLower.split(/[^a-z0-9\u0900-\u097f]+/).filter(Boolean);
+  if (target.length === 0 || credit.length === 0) return false;
+  if (target.length > credit.length) return false;
+  outer: for (let i = 0; i + target.length <= credit.length; i += 1) {
+    for (let j = 0; j < target.length; j += 1) {
+      if (credit[i + j] !== target[j]) continue outer;
+    }
+    // match found — everything before is a prefix (fine), everything
+    // after must be EMPTY (suffix tokens make it a different credit)
+    if (i + target.length === credit.length) return true;
+    return false;
+  }
+  return false;
+}
+
 function artistMatchScore(plan: SearchPlan, row: Candidate): number {
   if (plan.artistTokens.length === 0) return 0;
-  const hay = normalizeQuery(
-    `${row.artistsFull?.join(' ') ?? row.artist} ${row.featuredArtists?.join(' ') ?? ''}`,
-  );
+  const credits = row.artistsFull?.length
+    ? row.artistsFull
+    : row.artist.split(/,\s*/);
+  const featured = row.featuredArtists ?? [];
   let score = 0;
   for (const a of plan.artistTokens) {
-    if (hay.includes(a)) score += 1;
+    const hit =
+      credits.some((c) => artistContains(normalizeQuery(c), a)) ||
+      featured.some((c) => artistContains(normalizeQuery(c), a));
+    if (hit) score += 1;
   }
   return score;
 }
@@ -99,11 +138,10 @@ function artistMatchScore(plan: SearchPlan, row: Candidate): number {
  *  "Tum Hi Ho Bandhu" for query "tum hi ho" = 3/4 = 0.75; an exact
  *  "Tum Hi Ho" title = 1.0. Distinguishes the song from its neighbors. */
 function titlePrecision(plan: SearchPlan, row: Candidate): number {
-  const STOP = new Set(['from', 'the', 'a', 'an', 'vol']);
-  const wanted = new Set(plan.tokens.filter((t) => t.length >= 2 && !STOP.has(t)));
+  const wanted = new Set(titleQueryTokens(plan));
   const titleTokens = normalizeQuery(row.title)
     .split(' ')
-    .filter((t) => t.length >= 2 && !STOP.has(t));
+    .filter((t) => t.length >= 2);
   if (titleTokens.length === 0) return 0;
   let matched = 0;
   for (const t of titleTokens) {
@@ -146,8 +184,8 @@ export function rankRows(
 ): RankedRow[] {
   const scored: RankedRow[] = rows.map((row) => {
     const pr = providerRankScore(row.poolRank);
-    const qm = titleCoverage(plan, row);
     const am = artistMatchScore(plan, row);
+    const qm = titleCoverage(plan, row, am);
     const pers = personalization(ctx, row);
     const eng = Math.min(1.2, ctx.engagement?.[row.id] ?? 0);
     const qual = qualityScore(row);
@@ -172,19 +210,32 @@ export function rankRows(
       score,
       artistMatch: am,
       queryMatch: qm,
-      reasonCode: pickReason(plan, { v2, v1, pers, eng, pr, am }),
+      reasonCode: pickReason(plan, { v2, v1, pers, eng, pr, am, qm }),
     };
   });
 
-  // DISAMBIGUATION OVERRIDE: with artistTokens in the plan, artistMatch=0
-  // rows can never outrank artistMatch≥1 rows.
+  // DISAMBIGUATION OVERRIDE v2 (SIG M2.3): with artistTokens in the plan,
+  // promotion requires BOTH axes — artistMatch ≥ 1 AND title coverage
+  // ≥ 0.5 (a full title-match row). Artist-only rows (title ≈ 0) can
+  // never outrank title-matching rows: in the "tu chaiye" failure the
+  // old override promoted O'Meri Laila (right artist, wrong song) above
+  // the correct-title rows. artist-only rows are capped below every
+  // artist+title row when such rows exist.
   if (plan.artistTokens.length > 0) {
-    const cap = scored
-      .filter((r) => r.artistMatch >= 1)
+    const full = scored.filter((r) => r.artistMatch >= 1 && r.queryMatch >= 0.5);
+    const cap = full.reduce((m, r) => Math.min(m, r.score), Number.POSITIVE_INFINITY);
+    const titleOnlyCap = scored
+      .filter((r) => r.queryMatch >= 0.5)
       .reduce((m, r) => Math.min(m, r.score), Number.POSITIVE_INFINITY);
     if (Number.isFinite(cap)) {
       for (const r of scored) {
         if (r.artistMatch === 0 && r.score >= cap) r.score = cap - 0.001;
+      }
+    }
+    // artist-matching but title-zero rows sink below title-matching rows
+    for (const r of scored) {
+      if (r.artistMatch >= 1 && r.queryMatch < 0.5 && Number.isFinite(titleOnlyCap) && r.score >= titleOnlyCap) {
+        r.score = titleOnlyCap - 0.001;
       }
     }
   }
@@ -213,12 +264,17 @@ function snippetEchoProxy(plan: SearchPlan, row: Candidate): number {
 
 function pickReason(
   plan: SearchPlan,
-  s: { v2: number; v1: number; pers: number; eng: number; pr: number; am: number },
+  s: { v2: number; v1: number; pers: number; eng: number; pr: number; am: number; qm: number },
 ): SearchReasonCode {
   if (plan.kind === 'lyric_fragment' && s.v2 > 0) return 'LYRIC_MATCH';
   if (s.eng >= 0.5) return 'YOUR_PAST_CLICK';
   if (s.pers >= 0.4) return 'YOU_LISTEN';
-  if (s.am >= 1 || s.v1 >= 0.5 || s.pr >= 0.99) return 'MATCHES_SEARCH';
+  // SIG: "Best match" requires BOTH axes when the plan names an artist
+  if (plan.artistTokens.length > 0) {
+    if (s.am >= 1 && s.qm >= 0.5) return 'MATCHES_SEARCH';
+  } else if (s.v1 >= 0.5 || s.pr >= 0.99) {
+    return 'MATCHES_SEARCH';
+  }
   return 'PROVIDER_TOP';
 }
 
