@@ -113,21 +113,130 @@ beforeEach(() => {
 });
 
 describe('YT-A — YT Music catalog search parse', () => {
-  test('songs first, videos after, duplicates dropped, fields mapped', async () => {
+  test('TITLE-TRUTH v2 (lab.5): canonical recording tops remix junk; dup dropped; fields mapped', async () => {
     const f = makeFetch([(u) => (isSearch(u) ? { status: 200, json: YTM_SEARCH_BODY } : undefined)]);
     setYtFetch(f.impl);
     const res = await ytSearchMusic('tu chahiye atif aslam');
     expect(res.tracks.length).toBe(3); // dup dropped
-    expect(res.tracks[0].ytKind).toBe('song'); // songs before videos
-    expect(res.tracks[2].ytKind).toBe('video');
-    expect(res.tracks[0].youtubeId).toBe('sDKLK127GVA');
+    // CONTRACT CHANGE (v3.4.0-lab.5): results are TITLE-TRUTH ranked —
+    // the canonical "Tu Chahiye" (Pritam/Atif Aslam) tops the list even
+    // though YT's own order crowned the Lo-Fi Mix. The old
+    // provider-order-first contract is what painted remix junk as
+    // "Top result" on the device.
+    expect(res.tracks[0].youtubeId).toBe('vl8YTnx3gso');
+    expect(res.tracks[0].ytKind).toBe('song');
+    expect(res.topConfident).toBe(true);
+    // canonical row carries full metadata
+    expect(res.tracks[0].duration).toBe(231); // 3:51
+    expect(res.tracks[0].artist).toContain('Atif Aslam');
+    expect(res.tracks[0].artwork).toBe('https://i.ytimg.com/w544.jpg');
+    expect(res.tracks[0].id).toBe('yt-vl8YTnx3gso');
     expect(res.tracks[0].source).toBe('youtube');
-    // the canonical "Tu Chahiye" song row (index 1) carries full metadata
-    expect(res.tracks[1].youtubeId).toBe('vl8YTnx3gso');
-    expect(res.tracks[1].duration).toBe(231); // 3:51
-    expect(res.tracks[1].artist).toContain('Atif Aslam');
-    expect(res.tracks[1].artwork).toBe('https://i.ytimg.com/w544.jpg');
-    expect(res.tracks[1].id).toBe('yt-vl8YTnx3gso');
+    // edit-class junk (Lo-Fi Mix) survives the purge but sinks below the
+    // canonical title — never above any clean recording
+    expect(res.tracks[res.tracks.length - 1].youtubeId).toBe('sDKLK127GVA');
+    expect(res.tracks.some((t) => t.youtubeId === 'sDKLK127GVA')).toBe(true);
+  });
+
+  test('JUNK PURGE (lab.5): episodes/playlists/profiles/date-videos/durationless videos never paint', async () => {
+    const body = {
+      contents: {
+        tabbedSearchResultsRenderer: {
+          tabs: [
+            {
+              tabRenderer: {
+                content: {
+                  sectionListRenderer: {
+                    contents: [
+                      { itemSectionRenderer: { contents: [
+                        // the live-probed REAL shapes (lab.5 field report)
+                        item('8vPbzyXjCTM', 'Mujhe Sirf Tu Chahiye | Dard Bhari Shayari', 'Episode • Jun 5 • Sad Shayari Video'),
+                        item('ILO48d1jG_w', 'Own Karachi || Jawab tu Chahiye || HKM', 'Episode • Feb 19, 2024 • Karachi Wifi'),
+                        item('zx5EyFzsMKA', 'I just want you | Romantic Shayari Status', 'Episode • Sep 12, 2025 • Shayari'),
+                        item('abcdef1ghij', 'VocalReplay', 'Profile • @VocalReplay'),
+                        item('bcdefg1hij', 'Haryanvi Party', 'Playlist • YouTube Music • 97 songs'),
+                        item('cdefghi1jk', 'Sad Shayari Video', 'Podcast • Oye shayar G'),
+                        // "23h ago" parsed as 23 SECONDS by the old parser
+                        item('defghij1kl', 'Living Without Lying — Dostoevsky', 'Video • Deep Reads • 23h ago'),
+                        // date-only video (no duration) — news junk
+                        item('efghijk1lm', 'The TRUTH About Onion Oil', 'Video • Shivangi Desai • Jul 28, 2025'),
+                        // card-shelf video (no kind word, has views) — kept
+                        item('sDKLK127GVA', 'TU CHAHIYE (Lo-Fi Mix): DJ Moody', 'Amitabh Bhattacharya, Atif Aslam • 188K views • 5:09'),
+                        // classic-shelf song (no kind word, duration only) — kept as song
+                        item('vl8YTnx3gso', 'Tu Chahiye', 'Pritam, Atif Aslam & Amitabh Bhattacharya • 3:51'),
+                        // explicit Song row without duration (itemSection shape) — kept
+                        item('aaaaabbbbbc', 'Tu Chahiye', 'Song • Pritam, Atif Aslam & Amitabh Bhattacharya'),
+                      ] } },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    };
+    const f = makeFetch([(u) => (isSearch(u) ? { status: 200, json: body } : undefined)]);
+    setYtFetch(f.impl);
+    const res = await ytSearchMusic('tu chaiye');
+    const ids = res.tracks.map((t) => t.youtubeId);
+    // junk purged — episodes, profile, playlist, podcast, date/"ago" videos
+    expect(ids).not.toContain('8vPbzyXjCTM');
+    expect(ids).not.toContain('ILO48d1jG_w');
+    expect(ids).not.toContain('zx5EyFzsMKA');
+    expect(ids).not.toContain('abcdef1ghij');
+    expect(ids).not.toContain('bcdefg1hij');
+    expect(ids).not.toContain('cdefghi1jk');
+    expect(ids).not.toContain('defghij1kl'); // "23h ago" must not parse as 23s
+    expect(ids).not.toContain('efghijk1lm');
+    // playable music survives
+    expect(ids).toContain('vl8YTnx3gso');
+    expect(ids).toContain('aaaaabbbbbc');
+    expect(ids).toContain('sDKLK127GVA');
+    // canonical recording ranks FIRST, Lo-Fi Mix sinks below every clean title
+    expect(res.tracks[0].youtubeId).toBe('vl8YTnx3gso');
+    expect(res.topConfident).toBe(true);
+    // card-shelf video classified as VIDEO with credits-first artist
+    const card = res.tracks.find((t) => t.youtubeId === 'sDKLK127GVA')!;
+    expect(card.ytKind).toBe('video');
+    expect(card.artist).toBe('Amitabh Bhattacharya, Atif Aslam');
+    expect(card.playCount).toBe(188000);
+    expect(card.duration).toBe(309); // 5:09 — strict parse
+    // classic-shelf shape classified as SONG with credits artist
+    const shelfSong = res.tracks.find((t) => t.youtubeId === 'vl8YTnx3gso')!;
+    expect(shelfSong.ytKind).toBe('song');
+    expect(shelfSong.artist).toContain('Pritam');
+    expect(shelfSong.duration).toBe(231);
+  });
+
+  test('YT-TOP GATE (lab.5): unrelated rows → topConfident false (hero must not paint junk)', async () => {
+    const body = {
+      contents: {
+        tabbedSearchResultsRenderer: {
+          tabs: [
+            {
+              tabRenderer: {
+                content: {
+                  sectionListRenderer: {
+                    contents: [
+                      { itemSectionRenderer: { contents: [
+                        item('fff1', 'Sea Buckthorn benefits & dosage', 'Video • Health • 1.2M views • 8:12'),
+                        item('ggg2', 'Something completely unrelated here', 'Song • Unknown Artist • 3:00'),
+                      ] } },
+                    ],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      },
+    };
+    const f = makeFetch([(u) => (isSearch(u) ? { status: 200, json: body } : undefined)]);
+    setYtFetch(f.impl);
+    const res = await ytSearchMusic('tu chaiye atif aslam');
+    expect(res.tracks.length).toBe(2);
+    expect(res.topConfident).toBe(false);
   });
 
   test('search failure degrades to empty (never throws)', async () => {
@@ -135,6 +244,7 @@ describe('YT-A — YT Music catalog search parse', () => {
     setYtFetch(f.impl);
     const res = await ytSearchMusic('anything');
     expect(res.tracks).toEqual([]);
+    expect(res.topConfident).toBe(false);
   });
 });
 

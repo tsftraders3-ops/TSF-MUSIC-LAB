@@ -22,6 +22,7 @@
  */
 
 import type { Track } from '../types';
+import { rankYtTracks } from '../search/ytrank';
 
 // ── client registry (ONE place to update when YouTube rotates shapes) ──
 // Refreshed 2026-02 against the OSS playback ecosystem (yt-dlp PO-Token-Guide
@@ -266,11 +267,15 @@ function clientNameIndex(name: string): string {
 
 // ── search (WEB_REMIX catalog; WEB video fallback) ──
 
-function parseDuration(text: string | undefined): number {
+/** STRICT duration parse — "4:28" / "1:02:33" only. The old parseInt
+ *  form read "23h ago" as 23 SECONDS and "3D Creations" style noise
+ *  slipped junk through the ≤15 min video cap (lab.4 field report:
+ *  "Living Without Lying… Dostoevsky · 23h ago" painted in Songs). */
+export function parseYtDuration(text: string | undefined): number {
   if (!text) return 0;
-  const parts = text.split(':').map((p) => parseInt(p, 10));
-  if (parts.some((p) => Number.isNaN(p))) return 0;
-  return parts.reduce((acc, p) => acc * 60 + p, 0);
+  const t = text.trim();
+  if (!/^\d{1,2}(:\d{2}){1,2}$/.test(t)) return 0;
+  return t.split(':').reduce((acc, p) => acc * 60 + parseInt(p, 10), 0);
 }
 
 /** Parse a humanized count segment into a real number.
@@ -309,7 +314,27 @@ function thumbFrom(renderer: any): string {
   return best ? best.replace(/^\/\//, 'https://') : '';
 }
 
-/** Map one YT-Music list item to a Track (Song/Video rows only). */
+/** Shelf-kind words YT Music writes as the FIRST subtitle segment
+ *  ("Episode •", "Playlist •", "Profile •"…). Every one of them that is
+ *  not song/video is a non-playable row the recursive shelf walker must
+ *  never paint as a track (lab.4 report: shayari episodes, podcasts and
+ *  profiles inside the Songs list). */
+const YT_NON_TRACK_KINDS = new Set([
+  'episode', 'episodes', 'playlist', 'albums', 'album', 'artist', 'artists',
+  'ep', 'single', 'podcast', 'profile', 'station', 'audiobook', 'movie',
+  'featured on', 'top result', 'radio', 'user profile',
+]);
+
+/** Map one YT-Music list item to a Track (Song/Video rows only).
+ *
+ *  KIND DECISION TREE (v3.4.0-lab.5 — the junk-purge fix): YT Music
+ *  labels rows with a kind word as the first subtitle segment. Only
+ *  Song/Video rows are playable — everything else drops. Card-shelf rows
+ *  (the "Top result" card) carry NO kind word and are classified
+ *  structurally: a views segment → video, a duration-only segment →
+ *  song (the classic musicShelf shape "Artist • 3:51"), neither → drop.
+ *  The old default-to-song rule wedged Lo-Fi Mix videos into the Songs
+ *  list and let Episodes/Profiles flood it. */
 function toTrack(item: any): Track | null {
   const r = item?.musicResponsiveListItemRenderer;
   if (!r) return null;
@@ -321,14 +346,35 @@ function toTrack(item: any): Track | null {
   const subtitle = runs(1)
     .map((x: any) => x.text ?? '')
     .join('');
-  const kindWord = subtitle.split('•')[0]?.trim().toLowerCase() ?? '';
-  const ytKind: 'song' | 'video' = kindWord === 'video' ? 'video' : 'song';
   // "Song • Pritam, Atif Aslam & Amitabh Bhattacharya · 3:51" /
-  // "Video • LYRICAL BAM HINDI • 6.2M views • 4:28"
+  // "Video • LYRICAL BAM HINDI • 6.2M views • 4:28" /
+  // "Pritam, Atif Aslam & Amitabh Bhattacharya • 3:51" (card/shelf) /
+  // "Episode • Jun 5 • Sad Shayari Video" (junk)
   const segs = subtitle.split('•').map((s: string) => s.trim());
-  const artistSeg = segs[1] ?? '';
+  const kindWord = (segs[0] ?? '').toLowerCase();
   const durationSeg = [...segs].reverse().find((s: string) => /^\d{1,2}:\d{2}(:\d{2})?$/.test(s));
   const playsSeg = segs.find((s: string) => /views|plays/i.test(s));
+  let ytKind: 'song' | 'video';
+  let artistSeg: string;
+  if (kindWord === 'song') {
+    ytKind = 'song';
+    artistSeg = segs[1] ?? '';
+  } else if (kindWord === 'video') {
+    ytKind = 'video';
+    artistSeg = segs[1] ?? '';
+  } else if (YT_NON_TRACK_KINDS.has(kindWord)) {
+    return null; // episode/playlist/profile/podcast junk — not playable
+  } else if (playsSeg) {
+    // card-shelf video: credits live in the FIRST segment
+    ytKind = 'video';
+    artistSeg = segs[0] ?? '';
+  } else if (durationSeg) {
+    // card-shelf / classic shelf song: "Artist • 3:51"
+    ytKind = 'song';
+    artistSeg = segs[0] ?? '';
+  } else {
+    return null; // unidentifiable row — never paint it
+  }
   return {
     id: `yt-${videoId}`,
     youtubeId: videoId,
@@ -337,7 +383,7 @@ function toTrack(item: any): Track | null {
     artist: artistSeg || 'YouTube',
     artistsFull: artistSeg ? artistSeg.split(/,|&/).map((a: string) => a.trim()).filter(Boolean) : undefined,
     artwork: thumbFrom(r),
-    duration: parseDuration(durationSeg),
+    duration: parseYtDuration(durationSeg),
     source: 'youtube',
     previewOnly: false,
     playCount: playsSeg ? parseHumanCount(playsSeg) : undefined,
@@ -347,6 +393,9 @@ function toTrack(item: any): Track | null {
 export interface YtSearchResult {
   tracks: Track[];
   albums: Array<{ title: string; browseId?: string; artist?: string }>;
+  /** true when the top row genuinely matches the query title — the
+   *  SearchScreen "Top result" hero only paints on a confident top */
+  topConfident: boolean;
   latencyMs: number;
 }
 
@@ -358,7 +407,7 @@ export async function ytSearchMusic(query: string, limit = 20, signal?: AbortSig
   try {
     data = await innertube('search', remix, { query }, signal);
   } catch {
-    return { tracks: [], albums: [], latencyMs: Date.now() - t0 };
+    return { tracks: [], albums: [], topConfident: false, latencyMs: Date.now() - t0 };
   }
   const tracks: Track[] = [];
   const albums: YtSearchResult['albums'] = [];
@@ -391,12 +440,12 @@ export async function ytSearchMusic(query: string, limit = 20, signal?: AbortSig
   // musicCardShelf variants) — seed the recursive walker from EVERY
   // section so shape changes degrade to the same item set, never zero.
   for (const shelf of shelves) collect(shelf);
-  // songs first, videos after; drop non-music junk (news/date-only rows
-  // leak through the recursive walker — a real music row has either a
-  // song badge or a parseable duration); cap videos at 15 min
+  // purge: songs keep (the itemSection shape omits durations), videos
+  // must carry a STRICT-parsed duration ≤ 15 min (date-subtitled and
+  // durationless video-grid rows are news/podcast junk)
   const songs = tracks.filter((t) => t.ytKind === 'song');
   const videos = tracks.filter(
-    (t) => t.ytKind !== 'song' && (t.duration ?? 0) > 0 && (t.duration ?? 0) <= 15 * 60,
+    (t) => t.ytKind === 'video' && (t.duration ?? 0) > 0 && (t.duration ?? 0) <= 15 * 60,
   );
   const seen = new Set<string>();
   const merged = [...songs, ...videos].filter((t) => {
@@ -405,7 +454,17 @@ export async function ytSearchMusic(query: string, limit = 20, signal?: AbortSig
     seen.add(id);
     return true;
   });
-  return { tracks: merged.slice(0, limit), albums: albums.slice(0, 6), latencyMs: Date.now() - t0 };
+  // TITLE-TRUTH RANK (v3.4.0-lab.5): YT's own order is engagement-first —
+  // for "tu chaiye" it crowned a Lo-Fi Mix in the Top-result card while
+  // the official recording sat third. Canonical titles top the list;
+  // remix/cover junk sinks; views only break ties (search/ytrank.ts).
+  const { tracks: ranked, topConfident } = rankYtTracks(query, merged);
+  return {
+    tracks: ranked.slice(0, limit),
+    albums: albums.slice(0, 6),
+    topConfident,
+    latencyMs: Date.now() - t0,
+  };
 }
 
 // ── stream resolution (client ladder + health + diagnostics) ──

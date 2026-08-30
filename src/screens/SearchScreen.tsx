@@ -121,6 +121,10 @@ export function SearchScreen() {
   const [searched, setSearched] = useState(false);
   const [vibe, setVibe] = useState(false); // Keyword | Vibe mode (§9.8)
   const [source, setSource] = useState<'catalog' | 'youtube'>('catalog');
+  // YT-TOP GATE (v3.4.0-lab.5): the "Top result" hero only paints when
+  // the YouTube tab's best row genuinely matches the query title — a
+  // junk card (Lo-Fi Mix, remix, off-topic video) never gets the crown.
+  const [hideTopHero, setHideTopHero] = useState(false);
   const [vibeChips, setVibeChips] = useState<string[]>([]);
   const [suggests, setSuggests] = useState<AutocompleteBundle | null>(null);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -183,6 +187,7 @@ export function SearchScreen() {
         setVibeChips([]);
         setSearched(false);
         setSuggests(null);
+        setHideTopHero(false);
         return;
       }
       const gen = ++searchGen.current;
@@ -196,10 +201,14 @@ export function SearchScreen() {
       try {
         if (source === 'youtube') {
           // YOUTUBE SOURCE (YOUTUBE-INTEGRATION-PLAN §3.1): the YT Music
-          // catalog answers directly — Song rows first, then videos.
+          // catalog answers directly. Results are purged + TITLE-TRUTH
+          // ranked inside ytSearchMusic (canonical recording first,
+          // remix/cover junk sunk, episodes/profiles purged); the hero
+          // only paints on a genuine title match (topConfident).
           const ytr = await ytSearchMusic(q, 25, ctrl.signal);
           if (gen !== searchGen.current) return;
           setResults(ytr.tracks);
+          setHideTopHero(!ytr.topConfident);
           setMeta({ degraded: false, sigState: undefined, partialArtists: undefined });
           setVibeChips([]);
           void mindbeat.searchQueried(q, ytr.tracks.length);
@@ -216,6 +225,7 @@ export function SearchScreen() {
           if (gen !== searchGen.current) return;
           setResults(r.tracks);
           setMeta({ degraded: false });
+          setHideTopHero(false);
           setVibeChips([
             ...r.intent.moods.slice(0, 2),
             ...r.intent.languages.slice(0, 1),
@@ -249,6 +259,7 @@ export function SearchScreen() {
             isLyric: res.plan.kind === 'lyric_fragment',
           };
           setResults(res.tracks);
+          setHideTopHero(false);
           setMeta({
             degraded: res.degraded,
             reason: res.topReason,
@@ -752,8 +763,10 @@ export function SearchScreen() {
                   </Text>
                 </Pressable>
               ) : null}
-              {/* ── Top result — Spotify's hero card + truthful reason ── */}
-              {top ? (
+              {/* ── Top result — Spotify's hero card + truthful reason.
+                  YT-TOP GATE: hidden when the best row is not a confident
+                  title match (junk never gets the crown). ── */}
+              {top && !hideTopHero ? (
                 <View style={styles.topResultWrap}>
                   <Text style={styles.songsHeader}>Top result</Text>
                   <PressableScale
@@ -800,7 +813,11 @@ export function SearchScreen() {
                   </PressableScale>
                   <Text style={styles.songsHeader}>Songs</Text>
                 </View>
-              ) : null}
+              ) : (
+                <View style={styles.topResultWrap}>
+                  <Text style={styles.songsHeader}>Songs</Text>
+                </View>
+              )}
             </View>
           }
         />

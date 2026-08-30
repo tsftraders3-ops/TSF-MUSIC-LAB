@@ -11,15 +11,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { PressableScale } from './PressableScale';
 import { colors, fonts, radius, spacing } from '../theme';
 
-const SEEN_KEY = 'tsf.whatsNew.v3_4_0';
+const SEEN_KEY = 'tsf.whatsNew.v3_4_0_lab5';
 /** Set on every close — Onboarding polls it before showing (see Onboarding.tsx). */
 const WHATSNEW_DISMISSED_KEY = 'tsf.whatsNewDismissed';
 
 const CHANGES = [
-  'YouTube section is LIVE — full songs, ad-free playback, junk rows filtered out',
-  'Search now rescues the OFFICIAL song when the catalog only has same-name covers',
-  'Fixed the half-screen UI: the app now always renders full-screen (no more split-window wedges)',
-  'Tap-to-play is faster and never dies silently — a toast tells you if something fails',
+  'YouTube search is CLEAN — the official song is always the Top result, remixes/lo-fi sink, junk rows are gone',
+  'Fonts now ship inside the app — no more system-font fallback on some devices',
+  'Search still rescues the OFFICIAL song when the catalog only has covers',
+  'Fixed the half-screen UI: the app always renders full-screen',
 ];
 
 export function WhatsNewDialog() {

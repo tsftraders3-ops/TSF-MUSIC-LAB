@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import * as Font from 'expo-font';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -134,19 +134,28 @@ function SpotifyMark({ size, color }: { size: number; color: string }) {
 }
 
 export default function App() {
-  const [fontsReady, setFontsReady] = React.useState(false);
+  // FONT DELIVERY (v3.4.0-lab.5): on Android the Figtree TTFs ship as
+  // NATIVE assets (plugins/withNativeFonts copies them to
+  // android/app/src/main/assets/fonts/ at prebuild) — RN's font resolver
+  // answers 'Figtree-*' from the very first frame, so there is nothing
+  // to await and no fallback-to-system-font window. The old JS gate
+  // (loadAsync → null render) is kept ONLY for web, where native assets
+  // don't exist. This also removes the cold-start blank flash.
+  const [fontsReady, setFontsReady] = React.useState(Platform.OS !== 'web');
 
   React.useEffect(() => {
-    Font.loadAsync({
-      'Figtree-400': require('./assets/fonts/Figtree-400.ttf'),
-      'Figtree-500': require('./assets/fonts/Figtree-500.ttf'),
-      'Figtree-600': require('./assets/fonts/Figtree-600.ttf'),
-      'Figtree-700': require('./assets/fonts/Figtree-700.ttf'),
-      'Figtree-800': require('./assets/fonts/Figtree-800.ttf'),
-      'Figtree-900': require('./assets/fonts/Figtree-900.ttf'),
-    })
-      .then(() => setFontsReady(true))
-      .catch(() => setFontsReady(true)); // render with system font if load fails
+    if (Platform.OS === 'web') {
+      Font.loadAsync({
+        'Figtree-400': require('./assets/fonts/Figtree-400.ttf'),
+        'Figtree-500': require('./assets/fonts/Figtree-500.ttf'),
+        'Figtree-600': require('./assets/fonts/Figtree-600.ttf'),
+        'Figtree-700': require('./assets/fonts/Figtree-700.ttf'),
+        'Figtree-800': require('./assets/fonts/Figtree-800.ttf'),
+        'Figtree-900': require('./assets/fonts/Figtree-900.ttf'),
+      })
+        .then(() => setFontsReady(true))
+        .catch(() => setFontsReady(true)); // render with system font if load fails
+    }
   }, []);
 
   if (!fontsReady) return null;

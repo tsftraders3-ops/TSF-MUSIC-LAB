@@ -15,6 +15,7 @@ const projectRoot = __dirname;
 const WEB_MODULE_ALIASES = {
   'react-native-track-player': path.join(projectRoot, 'src/webmocks/trackPlayer.ts'),
   'expo-file-system': path.join(projectRoot, 'src/webmocks/fileSystem.ts'),
+  'react-native-webview': path.join(projectRoot, 'src/webmocks/webView.tsx'),
 };
 
 const WEB_PATH_REDIRECTS = [
@@ -25,6 +26,11 @@ const WEB_PATH_REDIRECTS = [
   { suffix: path.join('src', 'api', 'artists.ts'), to: path.join(projectRoot, 'src/webmocks/artists.ts') },
   // SEARCH V2: LRCLIB lyric verification → fixture lyrics (lab parity)
   { suffix: path.join('src', 'api', 'lrclib.ts'), to: path.join(projectRoot, 'src/webmocks/lrclib.ts') },
+  // YT SOURCE (lab.5): the bridge mock ALSO installs the LIVE "tu chaiye"
+  // search fixture into the REAL youtube.ts client (setYtFetch), so the
+  // YouTube tab runs the true purge + title-truth pipeline on the exact
+  // payload the lab.4 device run painted.
+  { suffix: path.join('src', 'api', 'ytPoToken.tsx'), to: path.join(projectRoot, 'src/webmocks/ytPoToken.ts') },
   // MINDBEAT: the SQLite ledger store has no web build — the in-memory
   // store exports the same createLedgerStore() signature (harness parity).
   { suffix: path.join('src', 'ai', 'core', 'storeSqlite.ts'), to: path.join(projectRoot, 'src/ai/core/storeMemory.ts') },
