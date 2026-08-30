@@ -57,3 +57,14 @@ bun run android     # build to your device (Expo 52 bare)
 - SIG design: `SEARCH-INTENT-RESCUE-PLAN.md` (repo root)
 - YouTube design: `YOUTUBE-INTEGRATION-PLAN.md` (repo root)
 - Test suites: `tests/ai/search_rescue.test.ts`, `tests/ai/youtube.test.ts`, `tests/ai/search_sig_e2e.test.ts`
+
+## 6. Signing identity of lab APKs (run #2 onward)
+
+- The lab repo now signs release APKs with a **lab-specific keystore** (alias `tsflocal`,
+  secrets configured 2026-08-30 after run #1 failed on missing secrets).
+- If you previously installed the **v3.3.0 APK from the main repo** (different signing
+  identity), Android will REFUSE to upgrade in place — uninstall the old app once, then
+  install the lab APK. Staging-only concern; the main repo keeps its original identity.
+- CI now has a **fail-fast preflight** step: broken/missing signing secrets fail in
+  seconds with a `::error::` naming the exact secret — instead of dying inside
+  `:app:packageRelease` after a ~17-minute build (run #1's failure mode).
